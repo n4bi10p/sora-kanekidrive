@@ -1,76 +1,85 @@
 const BASE = "https://n4bi10p.vercel.app";
 
 /**
- * REQUIRED: Source-scoped search
+ * SEARCH → resolve IDs → group by show folder
  */
 export async function searchResults(keyword) {
   if (!keyword || !keyword.trim()) return [];
 
   const res = await fetch(
-    `${BASE}/api/sora-search?q=${encodeURIComponent(keyword)}`
+    `${BASE}/api/search?q=${encodeURIComponent(keyword)}`
   );
 
-  const files = await res.json();
-  if (!Array.isArray(files) || files.length === 0) return [];
+  const items = await res.json();
+  const shows = new Map();
 
-  const map = new Map();
+  for (const item of items) {
+    if (!item.id) continue;
 
-  for (const file of files) {
-    const match = file.title.match(/^(.*?)(?:\.S\d{1,2}E\d{1,3})/i);
-    const title = match
-      ? match[1].replace(/\./g, " ").trim()
-      : keyword;
+    // 🔑 Resolve full path using existing index API
+    const itemRes = await fetch(`${BASE}/api/item?id=${item.id}`);
+    const data = await itemRes.json();
 
-    if (!map.has(title)) {
-      map.set(title, {
-        title,
-        image: "https://n4bi10p.vercel.app/favicon.ico",
-        href: title.toLowerCase().replace(/\s+/g, "-")
+    if (!data.path) continue;
+
+    // Expected path:
+    // /BotUpload/Streaming/Bleach/S01/Bleach.S01E14.mkv
+    const parts = data.path.split("/");
+    const streamingIndex = parts.indexOf("Streaming");
+    if (streamingIndex === -1) continue;
+
+    const show = parts[streamingIndex + 1];
+    if (!show) continue;
+
+    if (!shows.has(show)) {
+      shows.set(show, {
+        title: show,
+        image: `${BASE}/favicon.ico`,
+        href: `/BotUpload/Streaming/${show}`
       });
     }
   }
 
-  return Array.from(map.values());
+  return Array.from(shows.values());
 }
 
 /**
- * REQUIRED: Load items when a result is clicked
+ * DETAILS → list episodes
  */
-export async function loadDetails(href) {
-  const query = href.replace(/-/g, " ");
-
-  const res = await fetch(
-    `${BASE}/api/sora-search?q=${encodeURIComponent(query)}`
+export async function loadDetails(showPath) {
+  const seasonRes = await fetch(
+    `${BASE}/api/list?path=${encodeURIComponent(showPath)}`
   );
 
-  const files = await res.json();
-  if (!Array.isArray(files)) return [];
+  const seasons = await seasonRes.json();
+  const episodes = [];
 
-  return files
-    .map(file => {
-      const match = file.title.match(/E(\d{1,3})/i);
-      if (!match) return null;
+  for (const season of seasons) {
+    const epRes = await fetch(
+      `${BASE}/api/list?path=${encodeURIComponent(season.path)}`
+    );
 
-      return {
-        title: file.title,
-        href: file.path
-      };
-    })
-    .filter(Boolean);
+    const eps = await epRes.json();
+    for (const ep of eps) {
+      episodes.push({
+        title: ep.title,
+        href: ep.path
+      });
+    }
+  }
+
+  return episodes;
 }
 
 /**
- * REQUIRED: Resolve stream
+ * STREAM → OneDrive raw
  */
-export async function loadStreams(href) {
+export async function loadStreams(filePath) {
   return [
     {
-      url: `${BASE}/api/raw/?path=${href}`,
+      url: `${BASE}/api/raw/?path=${filePath}`,
       quality: "Auto",
-      type: "MP4",
-      headers: {
-        Referer: BASE
-      }
+      type: "MP4"
     }
   ];
 }
