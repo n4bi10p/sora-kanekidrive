@@ -1,21 +1,15 @@
 {
-  "sourceName": "KanekiDrive",
-  "iconUrl": "https://n4bi10p.vercel.app/favicon.ico",
-  "author": {
-    "name": "Nabil",
-    "icon": "https://n4bi10p.vercel.app/favicon.ico"
-  },
+  "name": "KanekiDrive",
+  "author": "N4bi10p",
   "version": "1.0.0",
-  "language": "English",
-  "type": "anime",
-  "streamType": "MP4",
-  "quality": "Auto",
-  "baseUrl": "https://n4bi10p.vercel.app",
-  "searchBaseUrl": "https://n4bi10p.vercel.app",
+  "description": "Stream anime, movies, and TV series directly from a personal OneDrive index using Sora/Luna. Fully automatic search powered by Microsoft Graph. No scraping, no catalogs.",
+  "iconUrl": "https://n4bi10p.vercel.app/favicon.ico",
   "scriptUrl": "https://raw.githubusercontent.com/n4bi10p/sora-kanekidrive/main/kanekidrive.js",
   "asyncJS": true,
-  "softsub": false,
-  "downloadSupport": true,
   "supportsSora": true,
-  "supportsLuna": true
+  "supportsLuna": true,
+  "streamType": "MP4",
+  "quality": "Auto",
+  "downloadSupport": true,
+  "softsub": false
 }
