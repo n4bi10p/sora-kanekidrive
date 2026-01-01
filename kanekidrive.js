@@ -1,9 +1,6 @@
 const BASE = "https://n4bi10p.vercel.app";
 
-/**
- * SEARCH → resolve IDs → group by show folder
- */
-export async function searchResults(keyword) {
+async function searchResults(keyword) {
   if (!keyword || !keyword.trim()) return [];
 
   const res = await fetch(
@@ -16,19 +13,16 @@ export async function searchResults(keyword) {
   for (const item of items) {
     if (!item.id) continue;
 
-    // 🔑 Resolve full path using existing index API
+    // resolve full path (index-style)
     const itemRes = await fetch(`${BASE}/api/item?id=${item.id}`);
     const data = await itemRes.json();
-
     if (!data.path) continue;
 
-    // Expected path:
-    // /BotUpload/Streaming/Bleach/S01/Bleach.S01E14.mkv
     const parts = data.path.split("/");
-    const streamingIndex = parts.indexOf("Streaming");
-    if (streamingIndex === -1) continue;
+    const idx = parts.indexOf("Streaming");
+    if (idx === -1) continue;
 
-    const show = parts[streamingIndex + 1];
+    const show = parts[idx + 1];
     if (!show) continue;
 
     if (!shows.has(show)) {
@@ -43,10 +37,7 @@ export async function searchResults(keyword) {
   return Array.from(shows.values());
 }
 
-/**
- * DETAILS → list episodes
- */
-export async function loadDetails(showPath) {
+async function loadDetails(showPath) {
   const seasonRes = await fetch(
     `${BASE}/api/list?path=${encodeURIComponent(showPath)}`
   );
@@ -71,10 +62,7 @@ export async function loadDetails(showPath) {
   return episodes;
 }
 
-/**
- * STREAM → OneDrive raw
- */
-export async function loadStreams(filePath) {
+async function loadStreams(filePath) {
   return [
     {
       url: `${BASE}/api/raw/?path=${filePath}`,
@@ -83,3 +71,8 @@ export async function loadStreams(filePath) {
     }
   ];
 }
+
+/* 🔑 THIS IS THE CRITICAL PART */
+globalThis.searchResults = searchResults;
+globalThis.loadDetails = loadDetails;
+globalThis.loadStreams = loadStreams;
