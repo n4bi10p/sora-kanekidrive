@@ -5,7 +5,7 @@
     "icon": "https://n4bi10p.vercel.app/favicon.ico"
   },
   "version": "1.0.0",
-  "language": "English (SUB/DUB)",
+  "language": "English",
   "type": "anime",
   "baseUrl": "https://n4bi10p.vercel.app",
   "searchBaseUrl": "https://n4bi10p.vercel.app/api/sora-search?q=%s",
