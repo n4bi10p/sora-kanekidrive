@@ -1,28 +1,30 @@
 const BASE = "https://n4bi10p.vercel.app";
 const RAW = `${BASE}/api/raw/?path=`;
 
-/**
- * Search content from OneDrive via Graph-powered API
- */
-async function search(query) {
-  if (!query || !query.trim()) return [];
-
+async function getEpisodes(meta) {
+  const title = meta.title;
   const res = await fetch(
-    `${BASE}/api/sora-search?q=${encodeURIComponent(query)}`
+    `${BASE}/api/sora-search?q=${encodeURIComponent(title)}`
   );
+  const files = await res.json();
 
-  return await res.json();
+  // map files → episodes
+  return files.map(file => {
+    const epMatch = file.title.match(/E(\d{1,3})/i);
+    return {
+      number: epMatch ? parseInt(epMatch[1]) : 0,
+      title: file.title,
+      file
+    };
+  }).filter(ep => ep.number > 0);
 }
 
-/**
- * Load a selected item and return stream info
- */
-async function load(item) {
+async function load(episode) {
   return {
-    title: item.title,
+    title: episode.title,
     streams: [
       {
-        url: RAW + item.path,
+        url: RAW + episode.file.path,
         quality: "Auto",
         type: "MP4",
         headers: {
@@ -33,4 +35,4 @@ async function load(item) {
   };
 }
 
-export { search, load };
+export { getEpisodes, load };
