@@ -1,38 +1,82 @@
 const BASE = "https://n4bi10p.vercel.app";
 const RAW = `${BASE}/api/raw/?path=`;
 
-async function getEpisodes(meta) {
-  const title = meta.title;
+/**
+ * Source-scoped search (Sora calls this)
+ */
+export async function search(query) {
+  if (!query || !query.trim()) return [];
+
   const res = await fetch(
-    `${BASE}/api/sora-search?q=${encodeURIComponent(title)}`
+    `${BASE}/api/sora-search?q=${encodeURIComponent(query)}`
   );
+
   const files = await res.json();
 
-  // map files → episodes
-  return files.map(file => {
-    const epMatch = file.title.match(/E(\d{1,3})/i);
-    return {
-      number: epMatch ? parseInt(epMatch[1]) : 0,
-      title: file.title,
-      file
-    };
-  }).filter(ep => ep.number > 0);
+  if (!files.length) return [];
+
+  // group by series name (before SxxExx)
+  const map = new Map();
+
+  for (const file of files) {
+    const match = file.title.match(/^(.*?)(?:\.S\d{1,2}E\d{1,3})/i);
+    const title = match ? match[1].replace(/\./g, ' ').trim() : query;
+
+    if (!map.has(title)) {
+      map.set(title, {
+        id: title.toLowerCase().replace(/\s+/g, '-'),
+        title,
+        type: "anime",
+        poster: "https://n4bi10p.vercel.app/favicon.ico"
+      });
+    }
+  }
+
+  return Array.from(map.values());
 }
 
-async function load(episode) {
+/**
+ * Called when user opens a search result
+ */
+export async function load(media) {
+  const res = await fetch(
+    `${BASE}/api/sora-search?q=${encodeURIComponent(media.title)}`
+  );
+
+  const files = await res.json();
+
+  const episodes = files
+    .map(file => {
+      const match = file.title.match(/E(\d{1,3})/i);
+      if (!match) return null;
+
+      return {
+        id: file.path,
+        number: parseInt(match[1]),
+        title: `Episode ${parseInt(match[1])}`,
+        file
+      };
+    })
+    .filter(Boolean)
+    .sort((a, b) => a.number - b.number);
+
   return {
-    title: episode.title,
-    streams: [
-      {
-        url: RAW + episode.file.path,
-        quality: "Auto",
-        type: "MP4",
-        headers: {
-          Referer: BASE
-        }
-      }
-    ]
+    episodes
   };
 }
 
-export { getEpisodes, load };
+/**
+ * Called when user clicks episode
+ */
+export async function getStreams(episode) {
+  return [
+    {
+      url: RAW + episode.file.path,
+      quality: "Auto",
+      type: "MP4",
+      headers: {
+        Referer: BASE
+      }
+    }
+  ];
+}
