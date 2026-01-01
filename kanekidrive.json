@@ -2,11 +2,8 @@
   "sourceName": "KanekiDrive",
   "author": "N4bi10p",
   "iconUrl": "https://n4bi10p.vercel.app/favicon.ico",
-  "version": "1.0",
-  "language": "English",
   "type": "anime",
   "baseUrl": "https://n4bi10p.vercel.app",
   "searchBaseUrl": "https://n4bi10p.vercel.app/api/search?q=%s",
-  "scriptUrl": "https://raw.githubusercontent.com/n4bi10p/sora-kanekidrive/main/kanekidrive.js",
-  "asyncJS": true
+  "scriptUrl": "https://raw.githubusercontent.com/n4bi10p/sora-kanekidrive/main/kanekidrive.js"
 }
