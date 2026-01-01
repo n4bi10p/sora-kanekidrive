@@ -1,10 +1,9 @@
 const BASE = "https://n4bi10p.vercel.app";
 
 /**
- * THIS is what Sora calls.
- * Name MUST be searchResults
+ * REQUIRED: Source-scoped search
  */
-async function searchResults(keyword) {
+export async function searchResults(keyword) {
   if (!keyword || !keyword.trim()) return [];
 
   const res = await fetch(
@@ -12,10 +11,8 @@ async function searchResults(keyword) {
   );
 
   const files = await res.json();
+  if (!Array.isArray(files) || files.length === 0) return [];
 
-  if (!files.length) return [];
-
-  // Group files by anime name
   const map = new Map();
 
   for (const file of files) {
@@ -37,9 +34,9 @@ async function searchResults(keyword) {
 }
 
 /**
- * Called when user clicks a search result
+ * REQUIRED: Load items when a result is clicked
  */
-async function loadDetails(href) {
+export async function loadDetails(href) {
   const query = href.replace(/-/g, " ");
 
   const res = await fetch(
@@ -47,8 +44,9 @@ async function loadDetails(href) {
   );
 
   const files = await res.json();
+  if (!Array.isArray(files)) return [];
 
-  const episodes = files
+  return files
     .map(file => {
       const match = file.title.match(/E(\d{1,3})/i);
       if (!match) return null;
@@ -59,14 +57,12 @@ async function loadDetails(href) {
       };
     })
     .filter(Boolean);
-
-  return episodes;
 }
 
 /**
- * Called to resolve stream
+ * REQUIRED: Resolve stream
  */
-async function loadStreams(href) {
+export async function loadStreams(href) {
   return [
     {
       url: `${BASE}/api/raw/?path=${href}`,
@@ -78,5 +74,3 @@ async function loadStreams(href) {
     }
   ];
 }
-
-export { searchResults, loadDetails, loadStreams };
