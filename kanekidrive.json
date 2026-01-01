@@ -1,19 +1,14 @@
 {
   "sourceName": "KanekiDrive",
-  "iconUrl": "https://n4bi10p.vercel.app/favicon.ico",
-  "author": {
-    "name": "N4bi10p",
-    "icon": "https://n4bi10p.vercel.app/favicon.ico"
-  },
-  "version": "1.0.0",
-  "language": "English",
+  "author": "N4bi10p",
   "type": "anime",
+  "language": "English",
+
   "baseUrl": "https://n4bi10p.vercel.app",
   "searchBaseUrl": "https://n4bi10p.vercel.app/api/search?q=%s",
+
   "scriptUrl": "https://cdn.jsdelivr.net/gh/n4bi10p/sora-kanekidrive@main/kanekidrive.js",
-  "asyncJS": true,
-  "softsub": false,
-  "downloadSupport": true,
-  "supportsSora": true,
-  "supportsLuna": true
+  "iconUrl": "https://n4bi10p.vercel.app/favicon.ico",
+
+  "asyncJS": true
 }
