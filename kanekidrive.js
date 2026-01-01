@@ -1,40 +1,106 @@
 const BASE = "https://n4bi10p.vercel.app";
 
-export async function search(query) {
-  const res = await fetch(`${BASE}/api/search?q=${encodeURIComponent(query)}`);
-  const data = await res.json();
+/**
+ * SEARCH → returns anime cards
+ */
+async function searchResults(keyword) {
+  try {
+    const res = await fetch(`${BASE}/api/search?q=${encodeURIComponent(keyword)}`);
+    const items = await res.json();
 
-  return data.map(item => ({
-    id: item.path,
-    title: item.title.replace(/\.(mkv|mp4)$/i, ""),
-    poster: "https://n4bi10p.vercel.app/favicon.ico",
-    type: "anime"
-  }));
+    const shows = new Map();
+
+    for (const item of items) {
+      if (!item.id) continue;
+
+      // Resolve full path (same as index UI)
+      const r = await fetch(`${BASE}/api/item?id=${item.id}`);
+      const data = await r.json();
+      if (!data.path) continue;
+
+      const parts = data.path.split("/");
+      const idx = parts.indexOf("Streaming");
+      if (idx === -1) continue;
+
+      const show = parts[idx + 1];
+      if (!show) continue;
+
+      if (!shows.has(show)) {
+        shows.set(show, {
+          title: show,
+          image: `${BASE}/favicon.ico`,
+          href: `/BotUpload/Streaming/${show}`
+        });
+      }
+    }
+
+    return JSON.stringify([...shows.values()]);
+  } catch (e) {
+    return JSON.stringify([]);
+  }
 }
 
-export async function loadAnime(id) {
-  return {
-    id,
-    title: id.split("/").pop(),
-    poster: "https://n4bi10p.vercel.app/favicon.ico",
-    description: "Streaming from OneDrive",
-    type: "anime"
-  };
+/**
+ * DETAILS → anime info page
+ */
+async function extractDetails(showPath) {
+  const title = showPath.split("/").pop();
+
+  return JSON.stringify([{
+    description: `Streaming ${title} from OneDrive`,
+    aliases: title,
+    airdate: "Unknown"
+  }]);
 }
 
-export async function loadEpisodes(animeId) {
-  const res = await fetch(`${BASE}/api/list?path=${encodeURIComponent(animeId)}`);
-  const data = await res.json();
+/**
+ * EPISODES → list episodes
+ */
+async function extractEpisodes(showPath) {
+  try {
+    const seasonRes = await fetch(
+      `${BASE}/api/list?path=${encodeURIComponent(showPath)}`
+    );
+    const seasons = await seasonRes.json();
 
-  return data.map((item, i) => ({
-    id: item.path,
-    number: i + 1,
-    title: item.title
-  }));
+    const episodes = [];
+    let counter = 1;
+
+    for (const season of seasons) {
+      const epRes = await fetch(
+        `${BASE}/api/list?path=${encodeURIComponent(season.path)}`
+      );
+      const eps = await epRes.json();
+
+      for (const ep of eps) {
+        episodes.push({
+          href: ep.path,
+          number: counter++
+        });
+      }
+    }
+
+    return JSON.stringify(episodes);
+  } catch (e) {
+    return JSON.stringify([]);
+  }
 }
 
-export async function loadStream(episodeId) {
-  return {
-    url: `${BASE}/api/raw?path=${encodeURIComponent(episodeId)}`
-  };
+/**
+ * STREAM → resolve OneDrive file
+ */
+async function extractStreamUrl(filePath) {
+  return JSON.stringify({
+    streams: [{
+      title: "Auto",
+      streamUrl: `${BASE}/api/raw/?path=${encodeURIComponent(filePath)}`
+    }],
+    subtitles: ""
+  });
 }
+
+/* 🔑 Expose functions globally (script mode) */
+globalThis.searchResults = searchResults;
+globalThis.extractDetails = extractDetails;
+globalThis.extractEpisodes = extractEpisodes;
+globalThis.extractStreamUrl = extractStreamUrl;
