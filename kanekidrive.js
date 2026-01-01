@@ -1,33 +1,34 @@
 const BASE = "https://n4bi10p.vercel.app";
-const RAW = `${BASE}/api/raw/?path=`;
 
 /**
- * Source-scoped search (Sora calls this)
+ * THIS is what Sora calls.
+ * Name MUST be searchResults
  */
-export async function search(query) {
-  if (!query || !query.trim()) return [];
+async function searchResults(keyword) {
+  if (!keyword || !keyword.trim()) return [];
 
   const res = await fetch(
-    `${BASE}/api/sora-search?q=${encodeURIComponent(query)}`
+    `${BASE}/api/sora-search?q=${encodeURIComponent(keyword)}`
   );
 
   const files = await res.json();
 
   if (!files.length) return [];
 
-  // group by series name (before SxxExx)
+  // Group files by anime name
   const map = new Map();
 
   for (const file of files) {
     const match = file.title.match(/^(.*?)(?:\.S\d{1,2}E\d{1,3})/i);
-    const title = match ? match[1].replace(/\./g, ' ').trim() : query;
+    const title = match
+      ? match[1].replace(/\./g, " ").trim()
+      : keyword;
 
     if (!map.has(title)) {
       map.set(title, {
-        id: title.toLowerCase().replace(/\s+/g, '-'),
         title,
-        type: "anime",
-        poster: "https://n4bi10p.vercel.app/favicon.ico"
+        image: "https://n4bi10p.vercel.app/favicon.ico",
+        href: title.toLowerCase().replace(/\s+/g, "-")
       });
     }
   }
@@ -36,11 +37,13 @@ export async function search(query) {
 }
 
 /**
- * Called when user opens a search result
+ * Called when user clicks a search result
  */
-export async function load(media) {
+async function loadDetails(href) {
+  const query = href.replace(/-/g, " ");
+
   const res = await fetch(
-    `${BASE}/api/sora-search?q=${encodeURIComponent(media.title)}`
+    `${BASE}/api/sora-search?q=${encodeURIComponent(query)}`
   );
 
   const files = await res.json();
@@ -51,27 +54,22 @@ export async function load(media) {
       if (!match) return null;
 
       return {
-        id: file.path,
-        number: parseInt(match[1]),
-        title: `Episode ${parseInt(match[1])}`,
-        file
+        title: file.title,
+        href: file.path
       };
     })
-    .filter(Boolean)
-    .sort((a, b) => a.number - b.number);
+    .filter(Boolean);
 
-  return {
-    episodes
-  };
+  return episodes;
 }
 
 /**
- * Called when user clicks episode
+ * Called to resolve stream
  */
-export async function getStreams(episode) {
+async function loadStreams(href) {
   return [
     {
-      url: RAW + episode.file.path,
+      url: `${BASE}/api/raw/?path=${href}`,
       quality: "Auto",
       type: "MP4",
       headers: {
@@ -80,3 +78,5 @@ export async function getStreams(episode) {
     }
   ];
 }
+
+export { searchResults, loadDetails, loadStreams };
