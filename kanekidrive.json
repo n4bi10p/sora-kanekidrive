@@ -1,14 +1,11 @@
 {
-  "sourceName": "KanekiDrive",
-  "author": "N4bi10p",
-  "type": "anime",
-  "language": "English",
-
-  "baseUrl": "https://n4bi10p.vercel.app",
-  "searchBaseUrl": "https://n4bi10p.vercel.app/api/search?q=%s",
-
-  "scriptUrl": "https://cdn.jsdelivr.net/gh/n4bi10p/sora-kanekidrive@main/kanekidrive.js",
-  "iconUrl": "https://n4bi10p.vercel.app/favicon.ico",
-
-  "asyncJS": true
+    "sourceName": "KanekiDrive",
+    "author": "n4bi10p",
+    "type": "anime",
+    "language": "English",
+    "baseUrl": "https://n4bi10p.vercel.app",
+    "searchBaseUrl": "https://n4bi10p.vercel.app/api/search?q=%s",
+    "scriptUrl": "https://n4bi10p.vercel.app/kanekidrive.js",
+    "iconUrl": "https://n4bi10p.vercel.app/favicon.ico",
+    "asyncJS": true
 }
