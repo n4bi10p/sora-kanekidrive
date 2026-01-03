@@ -163,6 +163,14 @@ function cleanFilename(filename) {
 }
 
 async function searchResults(keyword) {
+    // HARDCODED TEST: Verify module is loaded
+    return JSON.stringify([{
+        title: "Test Item - Module Loaded V2",
+        image: "https://via.placeholder.com/300x450.png?text=Test",
+        href: "test_href",
+        description: "If you see this, the JS is executing."
+    }]);
+
     try {
         const url = `${BASE_URL}/api/search?q=${encodeURIComponent(keyword)}`;
         // Added User-Agent to ensure headers are present
