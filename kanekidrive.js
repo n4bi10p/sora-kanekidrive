@@ -111,7 +111,7 @@ class Anilist {
                 })
             });
 
-            if (!response || (!response.ok && response.status !== 200)) return null;
+            if (!response || (!response.ok && response.status != 200)) return null;
 
             const json = await response.json();
             return json?.data;
@@ -168,10 +168,10 @@ async function searchResults(keyword) {
         // Added User-Agent to ensure headers are present
         const response = await soraFetch(url, { headers: { "User-Agent": "KanekiDrive/1.0" } });
 
-        // RELAXED CHECK: If .ok is missing but status is 200, assume success.
-        if (!response || (!response.ok && response.status !== 200)) {
+        // RELAXED CHECK: Use != 200 to allow "200" string or 200 number
+        if (!response || (!response.ok && response.status != 200)) {
             return JSON.stringify([{
-                title: "Error: API Fetch Failed " + (response ? response.status : "No Response"),
+                title: "Error: API Fetch Failed " + (response ? response.status : "No Response") + " (" + typeof (response?.status) + ")",
                 image: "https://via.placeholder.com/300x450.png?text=Error",
                 href: "error"
             }]);
@@ -250,9 +250,11 @@ async function searchResults(keyword) {
 
 async function extractDetails(url) {
     try {
+        // REMOVED DEBUG RETURN to ensure we use real logic
         if (url === "error" || url === "empty" || url === "crash") {
+            // Keep this minimal just to not crash if user clicks error card
             return JSON.stringify([{
-                description: "Debug Item - No Check logs",
+                description: "Debug: This indicates an error state.",
                 aliases: "Debug",
                 airdate: "Unknown"
             }]);
@@ -322,7 +324,7 @@ async function extractEpisodes(url) {
         const listUrl = `${BASE_URL}/api/list?path=${encodeURIComponent(payload.id)}`;
 
         const response = await soraFetch(listUrl);
-        if (!response || (!response.ok && response.status !== 200)) {
+        if (!response || (!response.ok && response.status != 200)) {
             return JSON.stringify([]);
         }
 
@@ -363,7 +365,6 @@ async function extractStreamUrl(url) {
             payload = { id: url };
         }
 
-        // Add raw=true
         const streamUrl = `${BASE_URL}/api/raw?path=${payload.id}&raw=true`;
 
         const result = {
