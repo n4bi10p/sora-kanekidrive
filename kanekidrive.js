@@ -1,6 +1,20 @@
 
 const BASE_URL = "https://n4bi10p.vercel.app";
 
+// Helper for Base64 encoding/decoding in environment without Buffer
+const Base64 = {
+    encode: (str) => {
+        try {
+            return btoa(unescape(encodeURIComponent(str)));
+        } catch (e) { return ""; }
+    },
+    decode: (str) => {
+        try {
+            return decodeURIComponent(escape(atob(str)));
+        } catch (e) { return ""; }
+    }
+};
+
 class Anilist {
     static async search(keyword, filters = {}) {
         const query = `query (
@@ -37,7 +51,7 @@ class Anilist {
 
         const variables = {
             "page": 1,
-            "perPage": 10, // Limit to avoid hitting limits too fast
+            "perPage": 10,
             "search": keyword,
             "type": "ANIME",
             ...filters
@@ -135,12 +149,22 @@ async function soraFetch(url, options = {}) {
 function cleanFilename(filename) {
     // Remove extension
     let name = filename.replace(/\.[^/.]+$/, "");
-    // Remove common release group tags [xxx] or (xxx)
-    name = name.replace(/\[.*?\]/g, "").replace(/\(.*?\)/g, "");
+    // Remove common release group tags [xxx] or (xxx) or {xxx}
+    name = name.replace(/\[.*?\]/g, "").replace(/\(.*?\)/g, "").replace(/\{.*?\}/g, "");
     // Remove common keywords
-    name = name.replace(/(1080p|720p|4k|web|bluray|x264|x265|hevc|av1)/gi, "");
-    // Remove episode numbers if possible (simple heuristic)
-    // name = name.replace(/\s\d{2,}\s/, " "); 
+    const keywords = [
+        "1080p", "720p", "480p", "4k", "2160p",
+        "web", "bluray", "bd", "hdtv",
+        "x264", "x265", "hevc", "av1", "h264",
+        "aac", "ac3", "dts",
+        "dual audio", "multi-audio", "multi audio"
+    ];
+    const regex = new RegExp(`(${keywords.join("|")})`, "gi");
+    name = name.replace(regex, "");
+
+    // Remove sequence of weird characters often found in torrent filenames
+    name = name.replace(/[\.\-_]/g, " ");
+
     return name.trim();
 }
 
@@ -159,7 +183,7 @@ async function searchResults(keyword) {
             items = [...(data.folders || []), ...(data.files || [])];
         }
 
-        // Limit results to top 10 to process metadata without timeout
+        // Limit results
         items = items.slice(0, 10);
 
         const results = await Promise.all(items.map(async (item) => {
@@ -176,20 +200,13 @@ async function searchResults(keyword) {
                     image = media.coverImage.extraLarge || media.coverImage.large;
                     description = media.description;
                     anilistId = media.id;
-                    // Optionally use proper title
-                    // cleanName = media.title.english || media.title.romaji;
                 }
             } catch (e) {
                 console.log("Metadata fetch failed for " + cleanName);
             }
 
-            // Fallback image so it shows up in Sora
+            // Fallback image
             if (!image) image = "https://via.placeholder.com/300x450.png?text=No+Image";
-
-            // We encode the custom data into a special href format or just pass ID
-            // Sora treats href as the key for next steps. 
-            // We'll pass a composite or just the ID. 
-            // If it's a file, we want to know it's a file.
 
             // Format: "type|id|anilistId|name"
             const type = item.file ? "file" : "folder";
@@ -200,14 +217,14 @@ async function searchResults(keyword) {
                 name: item.name
             };
 
-            // Base64 encode payload to be safe in URL-like string
-            const href = `kdrv://${Buffer.from(JSON.stringify(payload)).toString('base64')}`;
+            // Use Base64 helper instead of Buffer
+            const href = `kdrv://${Base64.encode(JSON.stringify(payload))}`;
 
             return {
-                title: item.name, // Keep original filename for clarity or use CleanName
+                title: item.name,
                 image: image,
                 href: href,
-                description: description // Sora might use this in list view?
+                description: description
             };
         }));
 
@@ -223,9 +240,8 @@ async function extractDetails(url) {
         let payload = {};
         if (url.startsWith("kdrv://")) {
             const base64 = url.replace("kdrv://", "");
-            payload = JSON.parse(Buffer.from(base64, 'base64').toString('utf-8'));
+            payload = JSON.parse(Base64.decode(base64));
         } else {
-            // Fallback if somehow just an ID passed (unlikely with above logic)
             payload = { id: url, type: "file", name: "Unknown" };
         }
 
@@ -241,8 +257,9 @@ async function extractDetails(url) {
             }
         }
 
-        // Clean description HTML
-        description = description.replace(/<[^>]+>/g, '');
+        if (description) {
+            description = description.replace(/<[^>]+>/g, '');
+        }
 
         const details = [{
             description: description,
@@ -266,33 +283,26 @@ async function extractEpisodes(url) {
         let payload = {};
         if (url.startsWith("kdrv://")) {
             const base64 = url.replace("kdrv://", "");
-            payload = JSON.parse(Buffer.from(base64, 'base64').toString('utf-8'));
+            payload = JSON.parse(Base64.decode(base64));
         } else {
             payload = { id: url, type: "file", name: "Unknown" };
         }
 
-        // If it's a direct file, return it as a single episode
         if (payload.type === 'file') {
             return JSON.stringify([{
-                href: url, // Pass the same payload to stream extraction
+                href: url,
                 number: 1,
                 title: "Movie / Episode"
             }]);
         }
 
-        // If it's a folder, we need to list it (Future implementation: handle recursive folders properly)
-        // For now, let's assume valid search hits are files primarily as seen in logs.
-        // But if folder, we try to list children.
-        const listUrl = `${BASE_URL}/api/list?path=${encodeURIComponent(payload.id)}`; // payload.id might be path or ID
-        // Note: OneDrive index might require ID or Path depending on config. User said "files from my onedrive".
-        // Debug showed search returning items with IDs.
+        const listUrl = `${BASE_URL}/api/list?path=${encodeURIComponent(payload.id)}`;
 
         const response = await soraFetch(listUrl);
         if (!response || !response.ok) return JSON.stringify([]);
         const data = await response.json();
 
         let files = data.files || [];
-        // Sort
         files.sort((a, b) => a.name.localeCompare(b.name));
 
         const episodes = files.map((f, i) => {
@@ -300,10 +310,10 @@ async function extractEpisodes(url) {
                 type: 'file',
                 id: f.id,
                 name: f.name,
-                anilistId: payload.anilistId // Pass down context
+                anilistId: payload.anilistId
             };
             return {
-                href: `kdrv://${Buffer.from(JSON.stringify(epPayload)).toString('base64')}`,
+                href: `kdrv://${Base64.encode(JSON.stringify(epPayload))}`,
                 number: i + 1,
                 title: f.name
             };
@@ -322,24 +332,12 @@ async function extractStreamUrl(url) {
         let payload = {};
         if (url.startsWith("kdrv://")) {
             const base64 = url.replace("kdrv://", "");
-            payload = JSON.parse(Buffer.from(base64, 'base64').toString('utf-8'));
+            payload = JSON.parse(Base64.decode(base64));
         } else {
-            // raw ID?
             payload = { id: url };
         }
 
-        // Construct Raw URL.
-        // We use ?path=ID because debug showed it redirects correctly for ID too.
-        // Or check if it supports ?id= param. Debug script output: 
-        // Raw (path=ID) Status: 308
-        // Raw (id=ID) Status: 308
-        // Both seem to redirect.
-
-        const isM3U8 = payload.name && payload.name.endsWith('.m3u8');
-
         const streamUrl = `${BASE_URL}/api/raw?path=${payload.id}&raw=true`;
-        // Adding &raw=true just in case (standard for some indexers), 
-        // otherwise just path usually triggers download/stream.
 
         const result = {
             streams: [{
