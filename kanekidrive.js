@@ -147,11 +147,8 @@ async function soraFetch(url, options = {}) {
 }
 
 function cleanFilename(filename) {
-    // Remove extension
     let name = filename.replace(/\.[^/.]+$/, "");
-    // Remove common release group tags [xxx] or (xxx) or {xxx}
     name = name.replace(/\[.*?\]/g, "").replace(/\(.*?\)/g, "").replace(/\{.*?\}/g, "");
-    // Remove common keywords
     const keywords = [
         "1080p", "720p", "480p", "4k", "2160p",
         "web", "bluray", "bd", "hdtv",
@@ -161,18 +158,23 @@ function cleanFilename(filename) {
     ];
     const regex = new RegExp(`(${keywords.join("|")})`, "gi");
     name = name.replace(regex, "");
-
-    // Remove sequence of weird characters often found in torrent filenames
     name = name.replace(/[\.\-_]/g, " ");
-
     return name.trim();
 }
 
 async function searchResults(keyword) {
     try {
         const url = `${BASE_URL}/api/search?q=${encodeURIComponent(keyword)}`;
-        const response = await soraFetch(url);
-        if (!response || !response.ok) return JSON.stringify([]);
+        // Added User-Agent to ensure headers are present
+        const response = await soraFetch(url, { headers: { "User-Agent": "KanekiDrive/1.0" } });
+
+        if (!response || !response.ok) {
+            return JSON.stringify([{
+                title: "Error: API Fetch Failed " + (response ? response.status : "No Response"),
+                image: "https://via.placeholder.com/300x450.png?text=Error",
+                href: "error"
+            }]);
+        }
 
         const data = await response.json();
 
@@ -193,7 +195,6 @@ async function searchResults(keyword) {
             let anilistId = 0;
 
             try {
-                // Fetch metadata from Anilist
                 const aniData = await Anilist.search(cleanName, { isAdult: false });
                 if (aniData?.Page?.media?.[0]) {
                     const media = aniData.Page.media[0];
@@ -205,10 +206,8 @@ async function searchResults(keyword) {
                 console.log("Metadata fetch failed for " + cleanName);
             }
 
-            // Fallback image
             if (!image) image = "https://via.placeholder.com/300x450.png?text=No+Image";
 
-            // Format: "type|id|anilistId|name"
             const type = item.file ? "file" : "folder";
             const payload = {
                 type: type,
@@ -217,7 +216,6 @@ async function searchResults(keyword) {
                 name: item.name
             };
 
-            // Use Base64 helper instead of Buffer
             const href = `kdrv://${Base64.encode(JSON.stringify(payload))}`;
 
             return {
@@ -228,15 +226,37 @@ async function searchResults(keyword) {
             };
         }));
 
+        // Debug/Fallback Item if empty
+        if (results.length === 0) {
+            results.push({
+                title: "No Results Found (API returned 0)",
+                image: "https://via.placeholder.com/300x450.png?text=Empty",
+                href: "empty"
+            });
+        }
+
         return JSON.stringify(results);
     } catch (error) {
         console.error("searchResults error:", error);
-        return JSON.stringify([]);
+        return JSON.stringify([{
+            title: "Crash: " + error.message,
+            image: "https://via.placeholder.com/300x450.png?text=Crash",
+            href: "crash",
+            description: error.stack
+        }]);
     }
 }
 
 async function extractDetails(url) {
     try {
+        if (url === "error" || url === "empty" || url === "crash") {
+            return JSON.stringify([{
+                description: "Debug Item - No Check logs",
+                aliases: "Debug",
+                airdate: "Unknown"
+            }]);
+        }
+
         let payload = {};
         if (url.startsWith("kdrv://")) {
             const base64 = url.replace("kdrv://", "");
@@ -280,6 +300,8 @@ async function extractDetails(url) {
 
 async function extractEpisodes(url) {
     try {
+        if (url === "error" || url === "empty" || url === "crash") return JSON.stringify([]);
+
         let payload = {};
         if (url.startsWith("kdrv://")) {
             const base64 = url.replace("kdrv://", "");
