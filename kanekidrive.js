@@ -337,23 +337,20 @@ async function listFolderRecursively(path, depth = 0, maxDepth = 2) {
 
     try {
         const url = `${BASE_URL}/api?path=${encodeURIComponent(path)}`;
-        const response = await soraFetch(url);
+        // Add User-Agent header
+        const response = await soraFetch(url, { headers: { "User-Agent": "KanekiDrive/1.0" } });
         if (!response || !response.ok) return [];
 
         const json = await response.json();
-        const items = json.folder?.value || []; // Structure: { folder: { value: [] } }
+        const items = json.folder?.value || [];
 
         let allFiles = [];
 
         for (const item of items) {
             if (item.folder) {
-                // Configurable: should we dive into "Season X"? Yes.
                 const subFiles = await listFolderRecursively(`${path}/${item.name}`, depth + 1, maxDepth);
                 allFiles = [...allFiles, ...subFiles];
             } else if (item.file) {
-                // Ensure item has the correct parent structure for later use if needed?
-                // We mainly need ID and Name.
-                // We add a synthetic 'fullPath' or 'parentPath' to the item for reference?
                 item._parentPath = path;
                 allFiles.push(item);
             }
@@ -361,7 +358,7 @@ async function listFolderRecursively(path, depth = 0, maxDepth = 2) {
 
         return allFiles;
     } catch (e) {
-        console.error("Recursive list error:", e);
+        console.error("Recursive list error:", e.message);
         return [];
     }
 }
@@ -378,162 +375,140 @@ async function extractEpisodes(url) {
             payload = { id: url, type: "file", name: "Unknown" };
         }
 
-        // If it's a direct file (not folder), return single episode
         if (payload.type === 'file') {
+            const href = `kdrv://${Base64.encode(JSON.stringify(payload))}`;
             return JSON.stringify([{
-                href: url,
+                href: href,
                 number: 1,
                 title: payload.name || "Movie / Episode"
             }]);
         }
 
-        // It's a FOLDER. Resolve path first.
         let listPath = "";
 
-        // 1. Check Map
         if (FOLDER_MAP[payload.id]) {
             listPath = FOLDER_MAP[payload.id];
         } else {
-            // 2. Resolve Dynamic
             try {
-                const itemRes = await soraFetch(`${BASE_URL}/api/item?id=${payload.id}`);
+                const itemUrl = `${BASE_URL}/api/item?id=${payload.id}`;
+                // Add header
+                const itemRes = await soraFetch(itemUrl, { headers: { "User-Agent": "KanekiDrive/1.0" } });
                 if (itemRes && (itemRes.ok || itemRes.status == 200)) {
                     const itemData = await itemRes.json();
                     if (itemData.parentReference && itemData.parentReference.path) {
                         const rawPath = itemData.parentReference.path;
                         const cleanParent = rawPath.replace("/drive/root:", "");
-                        // The item IS the folder, so the path is parent + "/" + name
                         listPath = `${cleanParent}/${itemData.name}`;
                     } else if (!itemData.parentReference && itemData.name) {
-                        // This might be a root folder like "BotUpload" itself, which has no parentReference.path
-                        // In this case, its path is just its name.
                         listPath = `/${itemData.name}`;
                     }
                 }
-            } catch (e) { console.log("Episode path resolution failed for ID: " + payload.id, e); }
+            } catch (e) { console.log("Episode path resolution failed: " + e.message); }
         }
 
-        // If resolution failed, maybe it's just root? Unlikely for search results.
-        // Try listing by null path? No.
         if (!listPath) {
-            console.log("Could not resolve path for episode listing: " + payload.id);
+            // Or recursively find all files?
+            // Simple 1-level list is safest for now.
+
+            let items = [...(data.folders || []), ...(data.files || [])];
+            items.sort((a, b) => a.name.localeCompare(b.name));
+
+            const episodes = items.map((f, i) => {
+                // If f is a folder, we link to IT as a new listing?
+                // But extractStreamUrl expects a FILE.
+                // If we return a folder here, clicking it in Sora attempts to PLAY it.
+                // Sora doesn't fully support deeper navigation in 'extractEpisodes' output I think?
+                // Actually, if we return a stream URL for a folder it breaks.
+                // We can only list FILES for playback.
+                // If we encounter a folder (like "Season 1"), we should probably dive into it?
+                // Complexity: recursive fetching.
+                // Hack: Just list files for now. If user sees "Season 1", they can't click it?
+                // Filter for FILES only?
+
+                if (f.folder) return null; // Skip subfolders for now to avoid playback errors
+
+                const epPayload = {
+                    type: 'file',
+                    id: f.id,
+                    name: f.name,
+                    anilistId: payload.anilistId,
+                    // We can pass parentPath since we know it now!
+                    parentPath: listPath
+                };
+
+                return {
+                    href: `kdrv://${Base64.encode(JSON.stringify(epPayload))}`,
+                    number: i + 1,
+                    title: f.name
+                };
+            }).filter(x => x !== null);
+
+            return JSON.stringify(episodes);
+
+        } catch (error) {
+            console.error("extractEpisodes error:", error);
             return JSON.stringify([]);
         }
-
-        const listUrl = `${BASE_URL}/api/list?path=${encodeURIComponent(listPath)}`;
-        const response = await soraFetch(listUrl);
-
-        if (!response || (!response.ok && response.status != 200)) {
-            return JSON.stringify([]);
-        }
-
-        const data = await response.json();
-
-        // Flatten folders? 
-        // If the folder contains sub-folders (Seasons), we should technically recurse or show them.
-        // For now, let's just show Files + Folders as clickable items?
-        // Or recursively find all files?
-        // Simple 1-level list is safest for now.
-
-        let items = [...(data.folders || []), ...(data.files || [])];
-        items.sort((a, b) => a.name.localeCompare(b.name));
-
-        const episodes = items.map((f, i) => {
-            // If f is a folder, we link to IT as a new listing?
-            // But extractStreamUrl expects a FILE.
-            // If we return a folder here, clicking it in Sora attempts to PLAY it.
-            // Sora doesn't fully support deeper navigation in 'extractEpisodes' output I think?
-            // Actually, if we return a stream URL for a folder it breaks.
-            // We can only list FILES for playback.
-            // If we encounter a folder (like "Season 1"), we should probably dive into it?
-            // Complexity: recursive fetching.
-            // Hack: Just list files for now. If user sees "Season 1", they can't click it?
-            // Filter for FILES only?
-
-            if (f.folder) return null; // Skip subfolders for now to avoid playback errors
-
-            const epPayload = {
-                type: 'file',
-                id: f.id,
-                name: f.name,
-                anilistId: payload.anilistId,
-                // We can pass parentPath since we know it now!
-                parentPath: listPath
-            };
-
-            return {
-                href: `kdrv://${Base64.encode(JSON.stringify(epPayload))}`,
-                number: i + 1,
-                title: f.name
-            };
-        }).filter(x => x !== null);
-
-        return JSON.stringify(episodes);
-
-    } catch (error) {
-        console.error("extractEpisodes error:", error);
-        return JSON.stringify([]);
     }
-}
 
 async function extractStreamUrl(url) {
-    try {
-        let payload = {};
-        if (url.startsWith("kdrv://")) {
-            const base64 = url.replace("kdrv://", "");
-            payload = JSON.parse(Base64.decode(base64));
-        } else {
-            payload = { id: url };
-        }
+        try {
+            let payload = {};
+            if (url.startsWith("kdrv://")) {
+                const base64 = url.replace("kdrv://", "");
+                payload = JSON.parse(Base64.decode(base64));
+            } else {
+                payload = { id: url };
+            }
 
-        let streamUrl = "";
+            let streamUrl = "";
 
-        let fullPath = "";
+            let fullPath = "";
 
-        // 1. Try Known Parent Path (from Search/Map)
-        if (payload.parentPath) {
-            fullPath = `${payload.parentPath}/${payload.name}`;
-        } else {
-            // 2. Dynamic Lookup via ID
-            try {
-                const itemUrl = `${BASE_URL}/api/item?id=${payload.id}`;
-                const itemRes = await soraFetch(itemUrl);
-                if (itemRes && (itemRes.ok || itemRes.status == 200)) {
-                    const itemData = await itemRes.json();
-                    if (itemData.parentReference && itemData.parentReference.path) {
-                        // usage: "/drive/root:/BotUpload/n4bi1AE" -> "/BotUpload/n4bi1AE"
-                        const rawPath = itemData.parentReference.path;
-                        const cleanParent = rawPath.replace("/drive/root:", "");
-                        fullPath = `${cleanParent}/${payload.name}`;
+            // 1. Try Known Parent Path (from Search/Map)
+            if (payload.parentPath) {
+                fullPath = `${payload.parentPath}/${payload.name}`;
+            } else {
+                // 2. Dynamic Lookup via ID
+                try {
+                    const itemUrl = `${BASE_URL}/api/item?id=${payload.id}`;
+                    const itemRes = await soraFetch(itemUrl);
+                    if (itemRes && (itemRes.ok || itemRes.status == 200)) {
+                        const itemData = await itemRes.json();
+                        if (itemData.parentReference && itemData.parentReference.path) {
+                            // usage: "/drive/root:/BotUpload/n4bi1AE" -> "/BotUpload/n4bi1AE"
+                            const rawPath = itemData.parentReference.path;
+                            const cleanParent = rawPath.replace("/drive/root:", "");
+                            fullPath = `${cleanParent}/${payload.name}`;
+                        }
                     }
+                } catch (e) {
+                    console.log("Dynamic path lookup failed for " + payload.name);
                 }
-            } catch (e) {
-                console.log("Dynamic path lookup failed for " + payload.name);
+
+                if (!fullPath) {
+                    // 3. Fallback to root
+                    fullPath = `/${payload.name}`;
+                }
             }
 
-            if (!fullPath) {
-                // 3. Fallback to root
-                fullPath = `/${payload.name}`;
-            }
+            streamUrl = `${BASE_URL}/api/raw?path=${encodeURIComponent(fullPath)}&raw=true`;
+
+            const result = {
+                streams: [{
+                    title: "OneDrive Direct",
+                    streamUrl: streamUrl,
+                    headers: {
+                        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)",
+                        "Referer": BASE_URL
+                    }
+                }],
+                subtitles: []
+            };
+
+            return JSON.stringify(result);
+        } catch (error) {
+            console.error("extractStreamUrl error:", error);
+            return JSON.stringify({ streams: [], subtitles: [] });
         }
-
-        streamUrl = `${BASE_URL}/api/raw?path=${encodeURIComponent(fullPath)}&raw=true`;
-
-        const result = {
-            streams: [{
-                title: "OneDrive Direct",
-                streamUrl: streamUrl,
-                headers: {
-                    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)",
-                    "Referer": BASE_URL
-                }
-            }],
-            subtitles: []
-        };
-
-        return JSON.stringify(result);
-    } catch (error) {
-        console.error("extractStreamUrl error:", error);
-        return JSON.stringify({ streams: [], subtitles: [] });
     }
-}
