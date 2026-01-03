@@ -438,140 +438,141 @@ async function extractEpisodes(url) {
                     }]);
                 }
             }
+        }
 
-            if (!listPath) {
-                console.error("[DEBUG] No listPath found, returning empty.");
-                return JSON.stringify([{
-                    href: "error",
-                    number: 1,
-                    title: `Error: No Path Found For ID ${payload.id}`
-                }]);
-            }
-
-            const files = await listFolderRecursively(listPath);
-
-            if (files.length === 0) {
-                return JSON.stringify([{
-                    href: "error",
-                    number: 1,
-                    title: `Error: No Files in ${listPath}`
-                }]);
-            }
-
-            // Improve sorting: Try to parse S01E01 if possible, else name sort
-            files.sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: 'base' }));
-
-
-            const episodes = files.map((f, i) => {
-                const epPayload = {
-                    type: 'file',
-                    id: f.id,
-                    name: f.name,
-                    anilistId: payload.anilistId,
-                    parentPath: f._parentPath
-                };
-
-                let finalTitle = f.name;
-                // Prepend subfolder name if file is nested (e.g. "Season 1 - 01.mkv")
-                if (f._parentPath && f._parentPath.length > listPath.length) {
-                    const relativePath = f._parentPath.substring(listPath.length);
-                    const subFolder = relativePath.replace(/^\//, "");
-                    if (subFolder) {
-                        finalTitle = `${subFolder} - ${f.name}`;
-                    }
-                }
-
-                return {
-                    href: `kdrv://${Base64.encode(JSON.stringify(epPayload))}`,
-                    number: i + 1,
-                    title: finalTitle
-                };
-            });
-
-            return JSON.stringify(episodes);
-
-        } catch (error) {
-            console.error("[DEBUG] extractEpisodes crash:", error.message);
+        if (!listPath) {
+            console.error("[DEBUG] No listPath found, returning empty.");
             return JSON.stringify([{
                 href: "error",
                 number: 1,
-                title: `Crash: ${error.message}`
+                title: `Error: No Path Found For ID ${payload.id}`
             }]);
         }
-    }
 
-async function extractStreamUrl(url) {
-        try {
-            console.error(`[DEBUG] extractStreamUrl called for: ${url}`);
+        const files = await listFolderRecursively(listPath);
 
-            let payload = {};
-            if (url.startsWith("kdrv://")) {
-                const base64 = url.replace("kdrv://", "");
-                payload = JSON.parse(Base64.decode(base64));
-            } else {
-                payload = { id: url };
-            }
+        if (files.length === 0) {
+            return JSON.stringify([{
+                href: "error",
+                number: 1,
+                title: `Error: No Files in ${listPath}`
+            }]);
+        }
 
-            console.error(`[DEBUG] Stream Payload: ${JSON.stringify(payload)}`);
+        // Improve sorting: Try to parse S01E01 if possible, else name sort
+        files.sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: 'base' }));
 
-            let fullPath = "";
 
-            // 1. Try Payload Path (Fastest)
-            if (payload.parentPath && payload.name) {
-                fullPath = `${payload.parentPath}/${payload.name}`;
-                console.error(`[DEBUG] Constructed from parentPath: ${fullPath}`);
-            }
-
-            // 2. If no path, or as a double-check if 404 is likely, Resolve Dynamic
-            if (!fullPath || fullPath.includes("/undefined")) {
-                console.error("[DEBUG] Resolving full path via ID...");
-                try {
-                    const itemUrl = `${BASE_URL}/api/item?id=${payload.id}`;
-                    const itemRes = await soraFetch(itemUrl, { headers: { "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36" } });
-
-                    if (itemRes && (itemRes.ok || itemRes.status == 200)) {
-                        const itemData = await itemRes.json();
-
-                        // Construct path from parentReference
-                        if (itemData.parentReference && itemData.parentReference.path) {
-                            const rawPath = itemData.parentReference.path;
-                            const cleanParent = rawPath.replace("/drive/root:", "");
-                            fullPath = `${cleanParent}/${itemData.name}`;
-                        } else if (itemData.name) {
-                            // Fallback for root items
-                            fullPath = `/${itemData.name}`;
-                        }
-                        console.error(`[DEBUG] Resolved path via API: ${fullPath}`);
-                    } else {
-                        console.error(`[DEBUG] Failed to resolve item: ${itemRes ? itemRes.status : "No Response"}`);
-                    }
-                } catch (e) { console.error(`[DEBUG] Stream path resolution crashed: ${e.message}`); }
-            }
-
-            if (!fullPath) {
-                console.error("[DEBUG] Fallback to simple name (Risky).");
-                fullPath = `/${payload.name || "video.mp4"}`;
-            }
-
-            console.error(`[DEBUG] Final URL Path: ${fullPath}`);
-
-            const streamUrl = `${BASE_URL}/api/raw?path=${encodeURIComponent(fullPath)}&raw=true`;
-
-            const result = {
-                streams: [{
-                    title: "OneDrive Direct",
-                    streamUrl: streamUrl,
-                    headers: {
-                        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)",
-                        "Referer": BASE_URL
-                    }
-                }],
-                subtitles: []
+        const episodes = files.map((f, i) => {
+            const epPayload = {
+                type: 'file',
+                id: f.id,
+                name: f.name,
+                anilistId: payload.anilistId,
+                parentPath: f._parentPath
             };
 
-            return JSON.stringify(result);
-        } catch (error) {
-            console.error("extractStreamUrl error:", error);
-            return JSON.stringify({ streams: [], subtitles: [] });
-        }
+            let finalTitle = f.name;
+            // Prepend subfolder name if file is nested (e.g. "Season 1 - 01.mkv")
+            if (f._parentPath && f._parentPath.length > listPath.length) {
+                const relativePath = f._parentPath.substring(listPath.length);
+                const subFolder = relativePath.replace(/^\//, "");
+                if (subFolder) {
+                    finalTitle = `${subFolder} - ${f.name}`;
+                }
+            }
+
+            return {
+                href: `kdrv://${Base64.encode(JSON.stringify(epPayload))}`,
+                number: i + 1,
+                title: finalTitle
+            };
+        });
+
+        return JSON.stringify(episodes);
+
+    } catch (error) {
+        console.error("[DEBUG] extractEpisodes crash:", error.message);
+        return JSON.stringify([{
+            href: "error",
+            number: 1,
+            title: `Crash: ${error.message}`
+        }]);
     }
+}
+
+async function extractStreamUrl(url) {
+    try {
+        console.error(`[DEBUG] extractStreamUrl called for: ${url}`);
+
+        let payload = {};
+        if (url.startsWith("kdrv://")) {
+            const base64 = url.replace("kdrv://", "");
+            payload = JSON.parse(Base64.decode(base64));
+        } else {
+            payload = { id: url };
+        }
+
+        console.error(`[DEBUG] Stream Payload: ${JSON.stringify(payload)}`);
+
+        let fullPath = "";
+
+        // 1. Try Payload Path (Fastest)
+        if (payload.parentPath && payload.name) {
+            fullPath = `${payload.parentPath}/${payload.name}`;
+            console.error(`[DEBUG] Constructed from parentPath: ${fullPath}`);
+        }
+
+        // 2. If no path, or as a double-check if 404 is likely, Resolve Dynamic
+        if (!fullPath || fullPath.includes("/undefined")) {
+            console.error("[DEBUG] Resolving full path via ID...");
+            try {
+                const itemUrl = `${BASE_URL}/api/item?id=${payload.id}`;
+                const itemRes = await soraFetch(itemUrl, { headers: { "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36" } });
+
+                if (itemRes && (itemRes.ok || itemRes.status == 200)) {
+                    const itemData = await itemRes.json();
+
+                    // Construct path from parentReference
+                    if (itemData.parentReference && itemData.parentReference.path) {
+                        const rawPath = itemData.parentReference.path;
+                        const cleanParent = rawPath.replace("/drive/root:", "");
+                        fullPath = `${cleanParent}/${itemData.name}`;
+                    } else if (itemData.name) {
+                        // Fallback for root items
+                        fullPath = `/${itemData.name}`;
+                    }
+                    console.error(`[DEBUG] Resolved path via API: ${fullPath}`);
+                } else {
+                    console.error(`[DEBUG] Failed to resolve item: ${itemRes ? itemRes.status : "No Response"}`);
+                }
+            } catch (e) { console.error(`[DEBUG] Stream path resolution crashed: ${e.message}`); }
+        }
+
+        if (!fullPath) {
+            console.error("[DEBUG] Fallback to simple name (Risky).");
+            fullPath = `/${payload.name || "video.mp4"}`;
+        }
+
+        console.error(`[DEBUG] Final URL Path: ${fullPath}`);
+
+        const streamUrl = `${BASE_URL}/api/raw?path=${encodeURIComponent(fullPath)}&raw=true`;
+
+        const result = {
+            streams: [{
+                title: "OneDrive Direct",
+                streamUrl: streamUrl,
+                headers: {
+                    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)",
+                    "Referer": BASE_URL
+                }
+            }],
+            subtitles: []
+        };
+
+        return JSON.stringify(result);
+    } catch (error) {
+        console.error("extractStreamUrl error:", error);
+        return JSON.stringify({ streams: [], subtitles: [] });
+    }
+}
