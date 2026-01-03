@@ -179,7 +179,7 @@ async function searchResults(keyword) {
 
         if (!isSuccess) {
             return JSON.stringify([{
-                title: "Error: API Fetch Failed " + (response ? response.status : "No Response") + " (" + typeof (response?.status) + ")",
+                title: "Error: API Fetch Failed",
                 image: "https://via.placeholder.com/300x450.png?text=Error",
                 href: "error"
             }]);
@@ -194,9 +194,48 @@ async function searchResults(keyword) {
             items = [...(data.folders || []), ...(data.files || [])];
         }
 
-        items = items.slice(0, 10);
+        // DEDUPLICATION & GROUPING
+        const seen = new Set();
+        const groupedResults = [];
 
-        const results = await Promise.all(items.map(async (item) => {
+        // Prioritize folders matching the keyword
+        items.forEach(item => {
+            // Logic:
+            // 1. If item is a folder, use it directly.
+            // 2. If item is a file, use its PARENT folder as the result (grouping).
+            // 3. Skip if we've already added this ID/ParentID.
+
+            let targetId = item.id;
+            let targetName = item.name;
+            let type = item.file ? 'file' : 'folder';
+
+            // If it's a file, try to group by parent
+            if (item.file && item.parentReference) {
+                targetId = item.parentReference.id;
+                // We don't have the parent name easily from search result usually, 
+                // but we might use the file name as a proxy for search, 
+                // or just accept we show the file's context.
+                // Better strategy: Use the file name but link to parent folder?
+                // No, user wants "Demon Slayer" not "Demon Slayer Ep 1".
+                // We'll use the parent ID.
+                type = 'folder';
+                // Note: We don't know the parent Name, so we clean the File Name 
+                // and hope it represents the show.
+                targetName = item.name;
+            }
+
+            if (!seen.has(targetId)) {
+                seen.add(targetId);
+                groupedResults.push({
+                    id: targetId,
+                    name: targetName,
+                    type: type,
+                    originalItem: item
+                });
+            }
+        });
+
+        const results = await Promise.all(groupedResults.slice(0, 15).map(async (item) => {
             const cleanName = cleanFilename(item.name);
             let image = "";
             let description = "";
@@ -216,32 +255,17 @@ async function searchResults(keyword) {
 
             if (!image) image = "https://via.placeholder.com/300x450.png?text=No+Image";
 
-            const type = item.file ? "file" : "folder";
-
-            // Resolve Parent Path from Known Map
-            let parentPath = "";
-            const parentId = item.parentReference?.id;
-
-            if (parentId) {
-                if (FOLDER_MAP[parentId]) {
-                    parentPath = FOLDER_MAP[parentId];
-                } else {
-                    console.log(`[MISSING MAP] Parent ID: ${parentId} for File: ${item.name}`);
-                }
-            }
-
             const payload = {
-                type: type,
-                id: item.id || item.path,
+                type: item.type, // 'folder' if grouped
+                id: item.id,
                 anilistId: anilistId,
-                name: item.name,
-                parentPath: parentPath
+                name: cleanName // Use cleaned name for display
             };
 
             const href = `kdrv://${Base64.encode(JSON.stringify(payload))}`;
 
             return {
-                title: item.name,
+                title: cleanName,
                 image: image,
                 href: href,
                 description: description
@@ -259,23 +283,14 @@ async function searchResults(keyword) {
         return JSON.stringify(results);
     } catch (error) {
         console.error("searchResults error:", error);
-        return JSON.stringify([{
-            title: "Crash: " + error.message,
-            image: "https://via.placeholder.com/300x450.png?text=Crash",
-            href: "crash",
-            description: error.stack
-        }]);
+        return JSON.stringify([]);
     }
 }
 
 async function extractDetails(url) {
     try {
         if (url === "error" || url === "empty" || url === "crash") {
-            return JSON.stringify([{
-                description: "",
-                aliases: "",
-                airdate: ""
-            }]);
+            return JSON.stringify([{ description: "", aliases: "", airdate: "" }]);
         }
 
         let payload = {};
@@ -311,11 +326,7 @@ async function extractDetails(url) {
         return JSON.stringify(details);
     } catch (error) {
         console.error("extractDetails error:", error);
-        return JSON.stringify([{
-            description: "Error loading details",
-            aliases: "",
-            airdate: ""
-        }]);
+        return JSON.stringify([{ description: "Error loading details", aliases: "", airdate: "" }]);
     }
 }
 
@@ -331,44 +342,98 @@ async function extractEpisodes(url) {
             payload = { id: url, type: "file", name: "Unknown" };
         }
 
+        // If it's a direct file (not folder), return single episode
         if (payload.type === 'file') {
-            // Pass forward parentPath via existing payload
-            const href = `kdrv://${Base64.encode(JSON.stringify(payload))}`;
             return JSON.stringify([{
-                href: href,
+                href: url,
                 number: 1,
-                title: "Movie / Episode"
+                title: payload.name || "Movie / Episode"
             }]);
         }
 
-        // NOTE: Folder listing likely fails here due to ID vs Path issue.
-        // But since we fixed file playback first, this is secondary.
-        const listUrl = `${BASE_URL}/api/list?path=${encodeURIComponent(payload.id)}`;
+        // It's a FOLDER (grouped search result). We need to list it.
+        // Problem: We only have the ID. api/list requires PATH.
+        // Solution: Use api/item to find the path, just like extractStreamUrl.
 
+        let listPath = "";
+
+        // 1. Check Map
+        if (FOLDER_MAP[payload.id]) {
+            listPath = FOLDER_MAP[payload.id];
+        } else {
+            // 2. Resolve Dynamic
+            try {
+                const itemRes = await soraFetch(`${BASE_URL}/api/item?id=${payload.id}`);
+                if (itemRes && (itemRes.ok || itemRes.status == 200)) {
+                    const itemData = await itemRes.json();
+                    if (itemData.parentReference && itemData.parentReference.path) {
+                        const rawPath = itemData.parentReference.path;
+                        const cleanParent = rawPath.replace("/drive/root:", "");
+                        // The item IS the folder, so the path is parent + "/" + name
+                        listPath = `${cleanParent}/${itemData.name}`;
+                    } else if (!itemData.parentReference && itemData.name) {
+                        // This might be a root folder like "BotUpload" itself, which has no parentReference.path
+                        // In this case, its path is just its name.
+                        listPath = `/${itemData.name}`;
+                    }
+                }
+            } catch (e) { console.log("Episode path resolution failed for ID: " + payload.id, e); }
+        }
+
+        // If resolution failed, maybe it's just root? Unlikely for search results.
+        // Try listing by null path? No.
+        if (!listPath) {
+            console.log("Could not resolve path for episode listing: " + payload.id);
+            return JSON.stringify([]);
+        }
+
+        const listUrl = `${BASE_URL}/api/list?path=${encodeURIComponent(listPath)}`;
         const response = await soraFetch(listUrl);
+
         if (!response || (!response.ok && response.status != 200)) {
             return JSON.stringify([]);
         }
 
         const data = await response.json();
 
-        let files = data.files || [];
-        files.sort((a, b) => a.name.localeCompare(b.name));
+        // Flatten folders? 
+        // If the folder contains sub-folders (Seasons), we should technically recurse or show them.
+        // For now, let's just show Files + Folders as clickable items?
+        // Or recursively find all files?
+        // Simple 1-level list is safest for now.
 
-        const episodes = files.map((f, i) => {
+        let items = [...(data.folders || []), ...(data.files || [])];
+        items.sort((a, b) => a.name.localeCompare(b.name));
+
+        const episodes = items.map((f, i) => {
+            // If f is a folder, we link to IT as a new listing?
+            // But extractStreamUrl expects a FILE.
+            // If we return a folder here, clicking it in Sora attempts to PLAY it.
+            // Sora doesn't fully support deeper navigation in 'extractEpisodes' output I think?
+            // Actually, if we return a stream URL for a folder it breaks.
+            // We can only list FILES for playback.
+            // If we encounter a folder (like "Season 1"), we should probably dive into it?
+            // Complexity: recursive fetching.
+            // Hack: Just list files for now. If user sees "Season 1", they can't click it?
+            // Filter for FILES only?
+
+            if (f.folder) return null; // Skip subfolders for now to avoid playback errors
+
             const epPayload = {
                 type: 'file',
                 id: f.id,
                 name: f.name,
                 anilistId: payload.anilistId,
-                parentPath: payload.id // ? If payload.id was a path, or mapped?
+                // We can pass parentPath since we know it now!
+                parentPath: listPath
             };
+
             return {
                 href: `kdrv://${Base64.encode(JSON.stringify(epPayload))}`,
                 number: i + 1,
                 title: f.name
             };
-        });
+        }).filter(x => x !== null);
 
         return JSON.stringify(episodes);
 
