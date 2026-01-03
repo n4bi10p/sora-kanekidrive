@@ -111,7 +111,7 @@ class Anilist {
                 })
             });
 
-            if (!response || !response.ok) return null;
+            if (!response || (!response.ok && response.status !== 200)) return null;
 
             const json = await response.json();
             return json?.data;
@@ -168,7 +168,8 @@ async function searchResults(keyword) {
         // Added User-Agent to ensure headers are present
         const response = await soraFetch(url, { headers: { "User-Agent": "KanekiDrive/1.0" } });
 
-        if (!response || !response.ok) {
+        // RELAXED CHECK: If .ok is missing but status is 200, assume success.
+        if (!response || (!response.ok && response.status !== 200)) {
             return JSON.stringify([{
                 title: "Error: API Fetch Failed " + (response ? response.status : "No Response"),
                 image: "https://via.placeholder.com/300x450.png?text=Error",
@@ -321,7 +322,10 @@ async function extractEpisodes(url) {
         const listUrl = `${BASE_URL}/api/list?path=${encodeURIComponent(payload.id)}`;
 
         const response = await soraFetch(listUrl);
-        if (!response || !response.ok) return JSON.stringify([]);
+        if (!response || (!response.ok && response.status !== 200)) {
+            return JSON.stringify([]);
+        }
+
         const data = await response.json();
 
         let files = data.files || [];
@@ -359,6 +363,7 @@ async function extractStreamUrl(url) {
             payload = { id: url };
         }
 
+        // Add raw=true
         const streamUrl = `${BASE_URL}/api/raw?path=${payload.id}&raw=true`;
 
         const result = {
