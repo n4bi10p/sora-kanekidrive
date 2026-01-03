@@ -1,6 +1,11 @@
 
 const BASE_URL = "https://n4bi10p.vercel.app";
 
+// Map known Parent IDs (from Search API) to Paths (for Raw API)
+const FOLDER_MAP = {
+    "01XOT3RXX7JQLISJGVFBDIK4PGBD7U4GH7": "/BotUpload"
+};
+
 // Helper for Base64 encoding/decoding in environment without Buffer
 const Base64 = {
     encode: (str) => {
@@ -112,7 +117,6 @@ class Anilist {
             });
 
             if (!response) return null;
-            // Use loose loose equality for Anilist too just in case
             if (!response.ok && response.status != 200) return null;
 
             const json = await response.json();
@@ -167,13 +171,8 @@ function cleanFilename(filename) {
 async function searchResults(keyword) {
     try {
         const url = `${BASE_URL}/api/search?q=${encodeURIComponent(keyword)}`;
-        // Added User-Agent to ensure headers are present
         const response = await soraFetch(url, { headers: { "User-Agent": "KanekiDrive/1.0" } });
 
-        // ROBUST CHECK:
-        // 1. Check if response exists
-        // 2. Check strict ok (if available)
-        // 3. Check loose status (allows "200" or 200)
         const isSuccess = response && (response.ok || response.status == 200);
 
         if (!isSuccess) {
@@ -193,7 +192,6 @@ async function searchResults(keyword) {
             items = [...(data.folders || []), ...(data.files || [])];
         }
 
-        // Limit results
         items = items.slice(0, 10);
 
         const results = await Promise.all(items.map(async (item) => {
@@ -217,11 +215,21 @@ async function searchResults(keyword) {
             if (!image) image = "https://via.placeholder.com/300x450.png?text=No+Image";
 
             const type = item.file ? "file" : "folder";
+
+            // Resolve Parent Path from Known Map
+            let parentPath = "";
+            if (item.parentReference && item.parentReference.id) {
+                if (FOLDER_MAP[item.parentReference.id]) {
+                    parentPath = FOLDER_MAP[item.parentReference.id];
+                }
+            }
+
             const payload = {
                 type: type,
                 id: item.id || item.path,
                 anilistId: anilistId,
-                name: item.name
+                name: item.name,
+                parentPath: parentPath
             };
 
             const href = `kdrv://${Base64.encode(JSON.stringify(payload))}`;
@@ -234,10 +242,9 @@ async function searchResults(keyword) {
             };
         }));
 
-        // Debug/Fallback Item if empty
         if (results.length === 0) {
             results.push({
-                title: "No Results Found (API returned 0)",
+                title: "No Results Found",
                 image: "https://via.placeholder.com/300x450.png?text=Empty",
                 href: "empty"
             });
@@ -319,17 +326,20 @@ async function extractEpisodes(url) {
         }
 
         if (payload.type === 'file') {
+            // Pass forward parentPath via existing payload
+            const href = `kdrv://${Base64.encode(JSON.stringify(payload))}`;
             return JSON.stringify([{
-                href: url,
+                href: href,
                 number: 1,
                 title: "Movie / Episode"
             }]);
         }
 
+        // NOTE: Folder listing likely fails here due to ID vs Path issue.
+        // But since we fixed file playback first, this is secondary.
         const listUrl = `${BASE_URL}/api/list?path=${encodeURIComponent(payload.id)}`;
 
         const response = await soraFetch(listUrl);
-        // Robust check here too
         if (!response || (!response.ok && response.status != 200)) {
             return JSON.stringify([]);
         }
@@ -344,7 +354,8 @@ async function extractEpisodes(url) {
                 type: 'file',
                 id: f.id,
                 name: f.name,
-                anilistId: payload.anilistId
+                anilistId: payload.anilistId,
+                parentPath: payload.id // ? If payload.id was a path, or mapped?
             };
             return {
                 href: `kdrv://${Base64.encode(JSON.stringify(epPayload))}`,
@@ -371,7 +382,17 @@ async function extractStreamUrl(url) {
             payload = { id: url };
         }
 
-        const streamUrl = `${BASE_URL}/api/raw?path=${payload.id}&raw=true`;
+        let streamUrl = "";
+
+        if (payload.parentPath) {
+            // We have a known parent path!
+            const fullPath = `${payload.parentPath}/${payload.name}`;
+            streamUrl = `${BASE_URL}/api/raw?path=${encodeURIComponent(fullPath)}&raw=true`;
+        } else {
+            // Fallback: Use root relative path if unknown
+            const fullPath = `/${payload.name}`;
+            streamUrl = `${BASE_URL}/api/raw?path=${encodeURIComponent(fullPath)}&raw=true`;
+        }
 
         const result = {
             streams: [{
