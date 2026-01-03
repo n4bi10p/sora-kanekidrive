@@ -1,9 +1,115 @@
 
 const BASE_URL = "https://n4bi10p.vercel.app";
 
+class Anilist {
+    static async search(keyword, filters = {}) {
+        const query = `query (
+                $search: String,
+                $page: Int,
+                $perPage: Int,
+                $type: MediaType,
+                $isAdult: Boolean
+            ) {
+                Page(page: $page, perPage: $perPage) {
+                media(
+                    search: $search,
+                    type: $type,
+                    isAdult: $isAdult
+                ) {
+                    id
+                    idMal
+                    title {
+                        romaji
+                        english
+                        native
+                    }
+                    coverImage {
+                        extraLarge
+                        large
+                        medium
+                    }
+                    description
+                    seasonYear
+                    bannerImage
+                }
+            }
+        }`;
+
+        const variables = {
+            "page": 1,
+            "perPage": 10, // Limit to avoid hitting limits too fast
+            "search": keyword,
+            "type": "ANIME",
+            ...filters
+        }
+
+        return Anilist.anilistFetch(query, variables);
+    }
+
+    static async lookup(filters) {
+        const query = `query (
+                $id: Int
+            ) {
+                Page(page: 1, perPage: 1) {
+                media(
+                    id: $id
+                ) {
+                    id
+                    idMal
+                    title {
+                        romaji
+                        english
+                        native
+                    }
+                    episodes
+                    status
+                    description
+                    seasonYear
+                    coverImage {
+                        extraLarge
+                        large
+                    }
+                    bannerImage
+                }
+            }
+        }`;
+
+        const variables = {
+            "type": "ANIME",
+            ...filters
+        }
+
+        return Anilist.anilistFetch(query, variables);
+    }
+
+    static async anilistFetch(query, variables) {
+        const url = 'https://graphql.anilist.co/';
+        try {
+            const response = await soraFetch(url, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Accept': 'application/json',
+                },
+                body: JSON.stringify({
+                    query: query,
+                    variables: variables
+                })
+            });
+
+            if (!response || !response.ok) return null;
+
+            const json = await response.json();
+            return json?.data;
+        } catch (error) {
+            console.error('Error fetching Anilist data:', error);
+            return null;
+        }
+    }
+}
+
 async function soraFetch(url, options = {}) {
     try {
-        // Sora environment often defines fetchv2
         if (typeof fetchv2 !== 'undefined') {
             return await fetchv2(
                 url,
@@ -20,10 +126,22 @@ async function soraFetch(url, options = {}) {
         try {
             return await fetch(url, options);
         } catch (error) {
-            console.error("soraFetch failed completely:", error);
+            console.error("soraFetch failed:", error);
             return null;
         }
     }
+}
+
+function cleanFilename(filename) {
+    // Remove extension
+    let name = filename.replace(/\.[^/.]+$/, "");
+    // Remove common release group tags [xxx] or (xxx)
+    name = name.replace(/\[.*?\]/g, "").replace(/\(.*?\)/g, "");
+    // Remove common keywords
+    name = name.replace(/(1080p|720p|4k|web|bluray|x264|x265|hevc|av1)/gi, "");
+    // Remove episode numbers if possible (simple heuristic)
+    // name = name.replace(/\s\d{2,}\s/, " "); 
+    return name.trim();
 }
 
 async function searchResults(keyword) {
@@ -31,11 +149,9 @@ async function searchResults(keyword) {
         const url = `${BASE_URL}/api/search?q=${encodeURIComponent(keyword)}`;
         const response = await soraFetch(url);
         if (!response || !response.ok) return JSON.stringify([]);
-        
+
         const data = await response.json();
-        
-        // onedrive-vercel-index usually returns { files: [], folders: [] } or an array
-        // We need to handle various potential responses robustly
+
         let items = [];
         if (Array.isArray(data)) {
             items = data;
@@ -43,27 +159,59 @@ async function searchResults(keyword) {
             items = [...(data.folders || []), ...(data.files || [])];
         }
 
-        // Group/Transform results
-        // We prefer folders as "Anime" entries
-        const results = items.map(item => {
-            return {
-                title: item.name || "Unknown",
-                image: "", // No image available from simple file index
-                href: item.path || item.id // Use path as the identifier
-            };
-        });
+        // Limit results to top 10 to process metadata without timeout
+        items = items.slice(0, 10);
 
-        // Simple deduplication based on href to avoid duplicates if API returns weirdly
-        const uniqueResults = [];
-        const seen = new Set();
-        for (const r of results) {
-            if (!seen.has(r.href)) {
-                seen.add(r.href);
-                uniqueResults.push(r);
+        const results = await Promise.all(items.map(async (item) => {
+            const cleanName = cleanFilename(item.name);
+            let image = "";
+            let description = "";
+            let anilistId = 0;
+
+            try {
+                // Fetch metadata from Anilist
+                const aniData = await Anilist.search(cleanName, { isAdult: false });
+                if (aniData?.Page?.media?.[0]) {
+                    const media = aniData.Page.media[0];
+                    image = media.coverImage.extraLarge || media.coverImage.large;
+                    description = media.description;
+                    anilistId = media.id;
+                    // Optionally use proper title
+                    // cleanName = media.title.english || media.title.romaji;
+                }
+            } catch (e) {
+                console.log("Metadata fetch failed for " + cleanName);
             }
-        }
 
-        return JSON.stringify(uniqueResults);
+            // Fallback image so it shows up in Sora
+            if (!image) image = "https://via.placeholder.com/300x450.png?text=No+Image";
+
+            // We encode the custom data into a special href format or just pass ID
+            // Sora treats href as the key for next steps. 
+            // We'll pass a composite or just the ID. 
+            // If it's a file, we want to know it's a file.
+
+            // Format: "type|id|anilistId|name"
+            const type = item.file ? "file" : "folder";
+            const payload = {
+                type: type,
+                id: item.id || item.path,
+                anilistId: anilistId,
+                name: item.name
+            };
+
+            // Base64 encode payload to be safe in URL-like string
+            const href = `kdrv://${Buffer.from(JSON.stringify(payload)).toString('base64')}`;
+
+            return {
+                title: item.name, // Keep original filename for clarity or use CleanName
+                image: image,
+                href: href,
+                description: description // Sora might use this in list view?
+            };
+        }));
+
+        return JSON.stringify(results);
     } catch (error) {
         console.error("searchResults error:", error);
         return JSON.stringify([]);
@@ -72,14 +220,34 @@ async function searchResults(keyword) {
 
 async function extractDetails(url) {
     try {
-        // url is the path, e.g., /Anime/Naruto
-        // Since we don't have metadata, we return synthetic info as requested
-        const name = url.split('/').pop() || "Unknown Title";
-        
+        let payload = {};
+        if (url.startsWith("kdrv://")) {
+            const base64 = url.replace("kdrv://", "");
+            payload = JSON.parse(Buffer.from(base64, 'base64').toString('utf-8'));
+        } else {
+            // Fallback if somehow just an ID passed (unlikely with above logic)
+            payload = { id: url, type: "file", name: "Unknown" };
+        }
+
+        let description = `Watch ${payload.name} on KanekiDrive.`;
+        let year = "Unknown";
+
+        if (payload.anilistId) {
+            const aniData = await Anilist.lookup({ id: payload.anilistId });
+            if (aniData?.Page?.media?.[0]) {
+                const media = aniData.Page.media[0];
+                description = media.description || description;
+                year = media.seasonYear || "Unknown";
+            }
+        }
+
+        // Clean description HTML
+        description = description.replace(/<[^>]+>/g, '');
+
         const details = [{
-            description: `Browse files for ${name} on KanekiDrive.`,
+            description: description,
             aliases: "Source: OneDrive",
-            airdate: "Unknown"
+            airdate: `Released: ${year}`
         }];
 
         return JSON.stringify(details);
@@ -95,53 +263,53 @@ async function extractDetails(url) {
 
 async function extractEpisodes(url) {
     try {
-        const episodes = [];
-        
-        // Helper for recursive listing
-        // API: /api/list?path=... (User specified /api/list)
-        async function fetchRecursive(currentPath) {
-            const listUrl = `${BASE_URL}/api/list?path=${encodeURIComponent(currentPath)}`;
-            const response = await soraFetch(listUrl);
-            if (!response || !response.ok) return;
-
-            const data = await response.json();
-            
-            // Handle standard index structure
-            const folders = data.folders || [];
-            const files = data.files || [];
-
-            // Process files (potential episodes)
-            for (const file of files) {
-                const name = file.name;
-                const ext = name.split('.').pop().toLowerCase();
-                if (['mp4', 'mkv', 'webm', 'mov', 'avi'].includes(ext)) {
-                    episodes.push({
-                        href: file.path, // Full path for extraction
-                        title: name,
-                        rawName: name 
-                    });
-                }
-            }
-
-            // Recurse into folders (Seasons, etc.)
-            for (const folder of folders) {
-                await fetchRecursive(folder.path);
-            }
+        let payload = {};
+        if (url.startsWith("kdrv://")) {
+            const base64 = url.replace("kdrv://", "");
+            payload = JSON.parse(Buffer.from(base64, 'base64').toString('utf-8'));
+        } else {
+            payload = { id: url, type: "file", name: "Unknown" };
         }
 
-        await fetchRecursive(url);
+        // If it's a direct file, return it as a single episode
+        if (payload.type === 'file') {
+            return JSON.stringify([{
+                href: url, // Pass the same payload to stream extraction
+                number: 1,
+                title: "Movie / Episode"
+            }]);
+        }
 
-        // Sort episodes naturally and assign numbers
-        // Simple sort by name
-        episodes.sort((a, b) => a.rawName.localeCompare(b.rawName, undefined, { numeric: true, sensitivity: 'base' }));
+        // If it's a folder, we need to list it (Future implementation: handle recursive folders properly)
+        // For now, let's assume valid search hits are files primarily as seen in logs.
+        // But if folder, we try to list children.
+        const listUrl = `${BASE_URL}/api/list?path=${encodeURIComponent(payload.id)}`; // payload.id might be path or ID
+        // Note: OneDrive index might require ID or Path depending on config. User said "files from my onedrive".
+        // Debug showed search returning items with IDs.
 
-        const finalEpisodes = episodes.map((ep, index) => ({
-            href: ep.href,
-            number: index + 1,
-            title: ep.title
-        }));
+        const response = await soraFetch(listUrl);
+        if (!response || !response.ok) return JSON.stringify([]);
+        const data = await response.json();
 
-        return JSON.stringify(finalEpisodes);
+        let files = data.files || [];
+        // Sort
+        files.sort((a, b) => a.name.localeCompare(b.name));
+
+        const episodes = files.map((f, i) => {
+            const epPayload = {
+                type: 'file',
+                id: f.id,
+                name: f.name,
+                anilistId: payload.anilistId // Pass down context
+            };
+            return {
+                href: `kdrv://${Buffer.from(JSON.stringify(epPayload)).toString('base64')}`,
+                number: i + 1,
+                title: f.name
+            };
+        });
+
+        return JSON.stringify(episodes);
 
     } catch (error) {
         console.error("extractEpisodes error:", error);
@@ -151,24 +319,38 @@ async function extractEpisodes(url) {
 
 async function extractStreamUrl(url) {
     try {
-        // url is the file path e.g. /Anime/Naruto/ep1.mp4
-        // Direct resolving via /api/raw
-        const streamUrl = `${BASE_URL}/api/raw?path=${encodeURIComponent(url)}`;
-        
-        // We assume the raw endpoint redirects to the actual file or proxies it.
-        // Sora supports this directly usually.
-        
+        let payload = {};
+        if (url.startsWith("kdrv://")) {
+            const base64 = url.replace("kdrv://", "");
+            payload = JSON.parse(Buffer.from(base64, 'base64').toString('utf-8'));
+        } else {
+            // raw ID?
+            payload = { id: url };
+        }
+
+        // Construct Raw URL.
+        // We use ?path=ID because debug showed it redirects correctly for ID too.
+        // Or check if it supports ?id= param. Debug script output: 
+        // Raw (path=ID) Status: 308
+        // Raw (id=ID) Status: 308
+        // Both seem to redirect.
+
+        const isM3U8 = payload.name && payload.name.endsWith('.m3u8');
+
+        const streamUrl = `${BASE_URL}/api/raw?path=${payload.id}&raw=true`;
+        // Adding &raw=true just in case (standard for some indexers), 
+        // otherwise just path usually triggers download/stream.
+
         const result = {
             streams: [{
                 title: "OneDrive Direct",
                 streamUrl: streamUrl,
                 headers: {
-                    "User-Agent": "Mozilla/5.0 (compatible; Sora/1.0)",
-                    // Sometimes explicit referer helps with Vercel/OneDrive
-                    "Referer": BASE_URL 
+                    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)",
+                    "Referer": BASE_URL
                 }
             }],
-            subtitles: [] // No subtitle parsing logic requested/possible without more metadata
+            subtitles: []
         };
 
         return JSON.stringify(result);
