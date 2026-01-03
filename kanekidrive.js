@@ -407,108 +407,97 @@ async function extractEpisodes(url) {
         }
 
         if (!listPath) {
-            // Or recursively find all files?
-            // Simple 1-level list is safest for now.
-
-            let items = [...(data.folders || []), ...(data.files || [])];
-            items.sort((a, b) => a.name.localeCompare(b.name));
-
-            const episodes = items.map((f, i) => {
-                // If f is a folder, we link to IT as a new listing?
-                // But extractStreamUrl expects a FILE.
-                // If we return a folder here, clicking it in Sora attempts to PLAY it.
-                // Sora doesn't fully support deeper navigation in 'extractEpisodes' output I think?
-                // Actually, if we return a stream URL for a folder it breaks.
-                // We can only list FILES for playback.
-                // If we encounter a folder (like "Season 1"), we should probably dive into it?
-                // Complexity: recursive fetching.
-                // Hack: Just list files for now. If user sees "Season 1", they can't click it?
-                // Filter for FILES only?
-
-                if (f.folder) return null; // Skip subfolders for now to avoid playback errors
-
-                const epPayload = {
-                    type: 'file',
-                    id: f.id,
-                    name: f.name,
-                    anilistId: payload.anilistId,
-                    // We can pass parentPath since we know it now!
-                    parentPath: listPath
-                };
-
-                return {
-                    href: `kdrv://${Base64.encode(JSON.stringify(epPayload))}`,
-                    number: i + 1,
-                    title: f.name
-                };
-            }).filter(x => x !== null);
-
-            return JSON.stringify(episodes);
-
-        } catch (error) {
-            console.error("extractEpisodes error:", error);
+            console.log("No listPath found for ID: " + payload.id);
             return JSON.stringify([]);
         }
-    }
 
-async function extractStreamUrl(url) {
-        try {
-            let payload = {};
-            if (url.startsWith("kdrv://")) {
-                const base64 = url.replace("kdrv://", "");
-                payload = JSON.parse(Base64.decode(base64));
-            } else {
-                payload = { id: url };
-            }
+        const files = await listFolderRecursively(listPath);
 
-            let streamUrl = "";
+        // Improve sorting: Try to parse S01E01 if possible, else name sort
+        files.sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: 'base' }));
 
-            let fullPath = "";
-
-            // 1. Try Known Parent Path (from Search/Map)
-            if (payload.parentPath) {
-                fullPath = `${payload.parentPath}/${payload.name}`;
-            } else {
-                // 2. Dynamic Lookup via ID
-                try {
-                    const itemUrl = `${BASE_URL}/api/item?id=${payload.id}`;
-                    const itemRes = await soraFetch(itemUrl);
-                    if (itemRes && (itemRes.ok || itemRes.status == 200)) {
-                        const itemData = await itemRes.json();
-                        if (itemData.parentReference && itemData.parentReference.path) {
-                            // usage: "/drive/root:/BotUpload/n4bi1AE" -> "/BotUpload/n4bi1AE"
-                            const rawPath = itemData.parentReference.path;
-                            const cleanParent = rawPath.replace("/drive/root:", "");
-                            fullPath = `${cleanParent}/${payload.name}`;
-                        }
-                    }
-                } catch (e) {
-                    console.log("Dynamic path lookup failed for " + payload.name);
-                }
-
-                if (!fullPath) {
-                    // 3. Fallback to root
-                    fullPath = `/${payload.name}`;
-                }
-            }
-
-            streamUrl = `${BASE_URL}/api/raw?path=${encodeURIComponent(fullPath)}&raw=true`;
-
-            const result = {
-                streams: [{
-                    title: "OneDrive Direct",
-                    streamUrl: streamUrl,
-                    headers: {
-                        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)",
-                        "Referer": BASE_URL
-                    }
-                }],
-                subtitles: []
+        const episodes = files.map((f, i) => {
+            const epPayload = {
+                type: 'file',
+                id: f.id,
+                name: f.name,
+                anilistId: payload.anilistId,
+                parentPath: f._parentPath
             };
 
-            return JSON.stringify(result);
-        } catch (error) {
-            console.error("extractStreamUrl error:", error);
-            return JSON.stringify({ streams: [], subtitles: [] });
-        }
+            return {
+                href: `kdrv://${Base64.encode(JSON.stringify(epPayload))}`,
+                number: i + 1,
+                title: f.name
+            };
+        });
+
+        return JSON.stringify(episodes);
+
+    } catch (error) {
+        console.error("extractEpisodes error:", error);
+        return JSON.stringify([]);
     }
+}
+
+async function extractStreamUrl(url) {
+    try {
+        let payload = {};
+        if (url.startsWith("kdrv://")) {
+            const base64 = url.replace("kdrv://", "");
+            payload = JSON.parse(Base64.decode(base64));
+        } else {
+            payload = { id: url };
+        }
+
+        let streamUrl = "";
+
+        let fullPath = "";
+
+        // 1. Try Known Parent Path (from Search/Map)
+        if (payload.parentPath) {
+            fullPath = `${payload.parentPath}/${payload.name}`;
+        } else {
+            // 2. Dynamic Lookup via ID
+            try {
+                const itemUrl = `${BASE_URL}/api/item?id=${payload.id}`;
+                const itemRes = await soraFetch(itemUrl);
+                if (itemRes && (itemRes.ok || itemRes.status == 200)) {
+                    const itemData = await itemRes.json();
+                    if (itemData.parentReference && itemData.parentReference.path) {
+                        // usage: "/drive/root:/BotUpload/n4bi1AE" -> "/BotUpload/n4bi1AE"
+                        const rawPath = itemData.parentReference.path;
+                        const cleanParent = rawPath.replace("/drive/root:", "");
+                        fullPath = `${cleanParent}/${payload.name}`;
+                    }
+                }
+            } catch (e) {
+                console.log("Dynamic path lookup failed for " + payload.name);
+            }
+
+            if (!fullPath) {
+                // 3. Fallback to root
+                fullPath = `/${payload.name}`;
+            }
+        }
+
+        streamUrl = `${BASE_URL}/api/raw?path=${encodeURIComponent(fullPath)}&raw=true`;
+
+        const result = {
+            streams: [{
+                title: "OneDrive Direct",
+                streamUrl: streamUrl,
+                headers: {
+                    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)",
+                    "Referer": BASE_URL
+                }
+            }],
+            subtitles: []
+        };
+
+        return JSON.stringify(result);
+    } catch (error) {
+        console.error("extractStreamUrl error:", error);
+        return JSON.stringify({ streams: [], subtitles: [] });
+    }
+}
