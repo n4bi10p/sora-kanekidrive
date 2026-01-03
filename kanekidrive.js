@@ -363,8 +363,11 @@ async function listFolderRecursively(path, depth = 0, maxDepth = 5) {
     }
 }
 
+
 async function extractEpisodes(url) {
     try {
+        console.error(`[DEBUG] extractEpisodes called for: ${url}`);
+
         if (url === "error" || url === "empty" || url === "crash") return JSON.stringify([]);
 
         let payload = {};
@@ -375,26 +378,21 @@ async function extractEpisodes(url) {
             payload = { id: url, type: "file", name: "Unknown" };
         }
 
-        // SMART LOGIC: If it's a file, we don't want to just return 1 episode.
-        // We want to find its parent folder and list EVERYTHING in there.
-        // This fixes the "Single Episode" issue when clicking a file search result.
-
+        // SMART LOGIC: If it's a file, find parent and list all
         let listPath = "";
 
         if (payload.type === 'file') {
-            console.error("[DEBUG] Input is FILE. Attempting to convert to Folder List.");
+            console.error("[DEBUG] Input is FILE. Converting to Folder List.");
             if (payload.parentPath) {
                 listPath = payload.parentPath;
             } else {
-                // Resolve ID to get parent
                 try {
                     const itemUrl = `${BASE_URL}/api/item?id=${payload.id}`;
                     const itemRes = await soraFetch(itemUrl, { headers: { "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36" } });
                     if (itemRes && (itemRes.ok || itemRes.status == 200)) {
                         const itemData = await itemRes.json();
                         if (itemData.parentReference && itemData.parentReference.path) {
-                            const rawPath = itemData.parentReference.path;
-                            listPath = rawPath.replace("/drive/root:", "");
+                            listPath = itemData.parentReference.path.replace("/drive/root:", "");
                         }
                     }
                 } catch (e) { console.error("[DEBUG] File parent resolution failed: " + e.message); }
@@ -403,8 +401,6 @@ async function extractEpisodes(url) {
         }
 
         if (!listPath) {
-
-
             if (FOLDER_MAP[payload.id]) {
                 listPath = FOLDER_MAP[payload.id];
             } else {
@@ -416,14 +412,13 @@ async function extractEpisodes(url) {
                     if (itemRes && (itemRes.ok || itemRes.status == 200)) {
                         const itemData = await itemRes.json();
                         if (itemData.parentReference && itemData.parentReference.path) {
-                            const rawPath = itemData.parentReference.path;
-                            const cleanParent = rawPath.replace("/drive/root:", "");
+                            const cleanParent = itemData.parentReference.path.replace("/drive/root:", "");
                             listPath = `${cleanParent}/${itemData.name}`;
-                        } else if (!itemData.parentReference && itemData.name) {
+                        } else if (itemData.name) {
                             listPath = `/${itemData.name}`;
                         }
                     } else {
-                        // UI DEBUG: Return error episode
+                        // Error
                         return JSON.stringify([{
                             href: "error",
                             number: 1,
@@ -459,9 +454,7 @@ async function extractEpisodes(url) {
             }]);
         }
 
-        // Improve sorting: Try to parse S01E01 if possible, else name sort
         files.sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: 'base' }));
-
 
         const episodes = files.map((f, i) => {
             const epPayload = {
@@ -473,7 +466,6 @@ async function extractEpisodes(url) {
             };
 
             let finalTitle = f.name;
-            // Prepend subfolder name if file is nested (e.g. "Season 1 - 01.mkv")
             if (f._parentPath && f._parentPath.length > listPath.length) {
                 const relativePath = f._parentPath.substring(listPath.length);
                 const subFolder = relativePath.replace(/^\//, "");
