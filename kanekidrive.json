@@ -1,14 +1,20 @@
 {
     "sourceName": "KanekiDrive",
-    "author": "n4bi10p",
-    "type": "anime",
+    "iconUrl": "https://n4bi10p.vercel.app/favicon.ico",
+    "author": {
+        "name": "n4bi10p",
+        "icon": "https://n4bi10p.vercel.app/favicon.ico",
+        "url": "https://github.com/n4bi10p"
+    },
+    "version": "1.0.0",
     "language": "English",
     "streamType": "HLS",
     "quality": "1080p",
     "baseUrl": "https://n4bi10p.vercel.app",
     "searchBaseUrl": "https://n4bi10p.vercel.app/api/search?q=%s",
     "scriptUrl": "https://n4bi10p.vercel.app/kanekidrive.js",
-    "iconUrl": "https://n4bi10p.vercel.app/favicon.ico",
+    "type": "anime",
     "downloadSupport": true,
-    "asyncJS": true
+    "asyncJS": true,
+    "softsub": true
 }
