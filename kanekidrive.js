@@ -1,9 +1,9 @@
 
 const BASE_URL = "https://n4bi10p.vercel.app";
 
-// Map known Parent IDs (from Search API) to Paths (for Raw API)
 const FOLDER_MAP = {
-    "01XOT3RXX7JQLISJGVFBDIK4PGBD7U4GH7": "/BotUpload"
+    "01XOT3RXX7JQLISJGVFBDIK4PGBD7U4GH7": "/BotUpload",
+    "01XOT3RXVSTY7LQNUAPNDYMM2S3JJ3I7QU": "/IN"
 };
 
 // Helper for Base64 encoding/decoding in environment without Buffer
