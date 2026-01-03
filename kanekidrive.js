@@ -111,7 +111,9 @@ class Anilist {
                 })
             });
 
-            if (!response || (!response.ok && response.status != 200)) return null;
+            if (!response) return null;
+            // Use loose loose equality for Anilist too just in case
+            if (!response.ok && response.status != 200) return null;
 
             const json = await response.json();
             return json?.data;
@@ -168,8 +170,13 @@ async function searchResults(keyword) {
         // Added User-Agent to ensure headers are present
         const response = await soraFetch(url, { headers: { "User-Agent": "KanekiDrive/1.0" } });
 
-        // RELAXED CHECK: Use != 200 to allow "200" string or 200 number
-        if (!response || (!response.ok && response.status != 200)) {
+        // ROBUST CHECK:
+        // 1. Check if response exists
+        // 2. Check strict ok (if available)
+        // 3. Check loose status (allows "200" or 200)
+        const isSuccess = response && (response.ok || response.status == 200);
+
+        if (!isSuccess) {
             return JSON.stringify([{
                 title: "Error: API Fetch Failed " + (response ? response.status : "No Response") + " (" + typeof (response?.status) + ")",
                 image: "https://via.placeholder.com/300x450.png?text=Error",
@@ -250,13 +257,11 @@ async function searchResults(keyword) {
 
 async function extractDetails(url) {
     try {
-        // REMOVED DEBUG RETURN to ensure we use real logic
         if (url === "error" || url === "empty" || url === "crash") {
-            // Keep this minimal just to not crash if user clicks error card
             return JSON.stringify([{
-                description: "Debug: This indicates an error state.",
-                aliases: "Debug",
-                airdate: "Unknown"
+                description: "",
+                aliases: "",
+                airdate: ""
             }]);
         }
 
@@ -324,6 +329,7 @@ async function extractEpisodes(url) {
         const listUrl = `${BASE_URL}/api/list?path=${encodeURIComponent(payload.id)}`;
 
         const response = await soraFetch(listUrl);
+        // Robust check here too
         if (!response || (!response.ok && response.status != 200)) {
             return JSON.stringify([]);
         }
