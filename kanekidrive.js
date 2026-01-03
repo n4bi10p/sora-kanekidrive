@@ -337,8 +337,8 @@ async function listFolderRecursively(path, depth = 0, maxDepth = 2) {
 
     try {
         const url = `${BASE_URL}/api?path=${encodeURIComponent(path)}`;
-        // Add User-Agent header
-        const response = await soraFetch(url, { headers: { "User-Agent": "KanekiDrive/1.0" } });
+        // Add User-Agent header (Standard Chrome to avoid bot detection)
+        const response = await soraFetch(url, { headers: { "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36" } });
         if (!response || !response.ok) return [];
 
         const json = await response.json();
@@ -386,13 +386,15 @@ async function extractEpisodes(url) {
 
         let listPath = "";
 
+
         if (FOLDER_MAP[payload.id]) {
             listPath = FOLDER_MAP[payload.id];
         } else {
+            console.error(`[DEBUG] Resolving path dynamically for ${payload.id}`);
             try {
                 const itemUrl = `${BASE_URL}/api/item?id=${payload.id}`;
-                // Add header
-                const itemRes = await soraFetch(itemUrl, { headers: { "User-Agent": "KanekiDrive/1.0" } });
+                const itemRes = await soraFetch(itemUrl, { headers: { "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36" } });
+
                 if (itemRes && (itemRes.ok || itemRes.status == 200)) {
                     const itemData = await itemRes.json();
                     if (itemData.parentReference && itemData.parentReference.path) {
@@ -402,16 +404,41 @@ async function extractEpisodes(url) {
                     } else if (!itemData.parentReference && itemData.name) {
                         listPath = `/${itemData.name}`;
                     }
+                } else {
+                    // UI DEBUG: Return error episode
+                    return JSON.stringify([{
+                        href: "error",
+                        number: 1,
+                        title: `Error: Item API ${itemRes ? itemRes.status : 'Null'}`
+                    }]);
                 }
-            } catch (e) { console.log("Episode path resolution failed: " + e.message); }
+            } catch (e) {
+                return JSON.stringify([{
+                    href: "error",
+                    number: 1,
+                    title: `Error: Path Resolve Crash ${e.message}`
+                }]);
+            }
         }
 
         if (!listPath) {
-            console.log("No listPath found for ID: " + payload.id);
-            return JSON.stringify([]);
+            console.error("[DEBUG] No listPath found, returning empty.");
+            return JSON.stringify([{
+                href: "error",
+                number: 1,
+                title: `Error: No Path Found For ID ${payload.id}`
+            }]);
         }
 
         const files = await listFolderRecursively(listPath);
+
+        if (files.length === 0) {
+            return JSON.stringify([{
+                href: "error",
+                number: 1,
+                title: `Error: No Files in ${listPath}`
+            }]);
+        }
 
         // Improve sorting: Try to parse S01E01 if possible, else name sort
         files.sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: 'base' }));
@@ -435,8 +462,12 @@ async function extractEpisodes(url) {
         return JSON.stringify(episodes);
 
     } catch (error) {
-        console.error("extractEpisodes error:", error);
-        return JSON.stringify([]);
+        console.error("[DEBUG] extractEpisodes crash:", error.message);
+        return JSON.stringify([{
+            href: "error",
+            number: 1,
+            title: `Crash: ${error.message}`
+        }]);
     }
 }
 
@@ -461,7 +492,7 @@ async function extractStreamUrl(url) {
             // 2. Dynamic Lookup via ID
             try {
                 const itemUrl = `${BASE_URL}/api/item?id=${payload.id}`;
-                const itemRes = await soraFetch(itemUrl);
+                const itemRes = await soraFetch(itemUrl, { headers: { "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36" } });
                 if (itemRes && (itemRes.ok || itemRes.status == 200)) {
                     const itemData = await itemRes.json();
                     if (itemData.parentReference && itemData.parentReference.path) {
