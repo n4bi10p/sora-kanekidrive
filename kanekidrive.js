@@ -3,7 +3,7 @@ const BASE_URL = "https://n4bi10p.vercel.app";
 
 const FOLDER_MAP = {
     "01XOT3RXX7JQLISJGVFBDIK4PGBD7U4GH7": "/BotUpload",
-    "01XOT3RXVSTY7LQNUAPNDYMM2S3JJ3I7QU": "/IN"
+    "01XOT3RXVSTY7LQNUAPNDYMM2S3JJ3I7QU": "/BotUpload/ae presets n all/User Presets/500 Bounce Text Presets/IN"
 };
 
 // Helper for Base64 encoding/decoding in environment without Buffer
