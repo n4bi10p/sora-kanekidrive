@@ -330,6 +330,42 @@ async function extractDetails(url) {
     }
 }
 
+
+// Helper for recursive folder listing
+async function listFolderRecursively(path, depth = 0, maxDepth = 2) {
+    if (depth > maxDepth) return [];
+
+    try {
+        const url = `${BASE_URL}/api?path=${encodeURIComponent(path)}`;
+        const response = await soraFetch(url);
+        if (!response || !response.ok) return [];
+
+        const json = await response.json();
+        const items = json.folder?.value || []; // Structure: { folder: { value: [] } }
+
+        let allFiles = [];
+
+        for (const item of items) {
+            if (item.folder) {
+                // Configurable: should we dive into "Season X"? Yes.
+                const subFiles = await listFolderRecursively(`${path}/${item.name}`, depth + 1, maxDepth);
+                allFiles = [...allFiles, ...subFiles];
+            } else if (item.file) {
+                // Ensure item has the correct parent structure for later use if needed?
+                // We mainly need ID and Name.
+                // We add a synthetic 'fullPath' or 'parentPath' to the item for reference?
+                item._parentPath = path;
+                allFiles.push(item);
+            }
+        }
+
+        return allFiles;
+    } catch (e) {
+        console.error("Recursive list error:", e);
+        return [];
+    }
+}
+
 async function extractEpisodes(url) {
     try {
         if (url === "error" || url === "empty" || url === "crash") return JSON.stringify([]);
@@ -351,10 +387,7 @@ async function extractEpisodes(url) {
             }]);
         }
 
-        // It's a FOLDER (grouped search result). We need to list it.
-        // Problem: We only have the ID. api/list requires PATH.
-        // Solution: Use api/item to find the path, just like extractStreamUrl.
-
+        // It's a FOLDER. Resolve path first.
         let listPath = "";
 
         // 1. Check Map
