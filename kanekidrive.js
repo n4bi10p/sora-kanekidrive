@@ -3,7 +3,9 @@ const BASE_URL = "https://n4bi10p.vercel.app";
 
 const FOLDER_MAP = {
     "01XOT3RXX7JQLISJGVFBDIK4PGBD7U4GH7": "/BotUpload",
-    "01XOT3RXVSTY7LQNUAPNDYMM2S3JJ3I7QU": "/BotUpload/ae presets n all/User Presets/500 Bounce Text Presets/IN"
+    "01XOT3RXVSTY7LQNUAPNDYMM2S3JJ3I7QU": "/BotUpload/ae presets n all/User Presets/500 Bounce Text Presets/IN",
+    "01XOT3RXRLLVTSNXJIWZG2MZ2SPSN247OR": "/BotUpload/n4bi1AE",
+    // "01XOT3RXXJTTJCWD4C4ZHZWKJ5VQAFHA25": "/Path/To/CountFolder"
 };
 
 // Helper for Base64 encoding/decoding in environment without Buffer
@@ -218,9 +220,13 @@ async function searchResults(keyword) {
 
             // Resolve Parent Path from Known Map
             let parentPath = "";
-            if (item.parentReference && item.parentReference.id) {
-                if (FOLDER_MAP[item.parentReference.id]) {
-                    parentPath = FOLDER_MAP[item.parentReference.id];
+            const parentId = item.parentReference?.id;
+
+            if (parentId) {
+                if (FOLDER_MAP[parentId]) {
+                    parentPath = FOLDER_MAP[parentId];
+                } else {
+                    console.log(`[MISSING MAP] Parent ID: ${parentId} for File: ${item.name}`);
                 }
             }
 
@@ -384,15 +390,36 @@ async function extractStreamUrl(url) {
 
         let streamUrl = "";
 
+        let fullPath = "";
+
+        // 1. Try Known Parent Path (from Search/Map)
         if (payload.parentPath) {
-            // We have a known parent path!
-            const fullPath = `${payload.parentPath}/${payload.name}`;
-            streamUrl = `${BASE_URL}/api/raw?path=${encodeURIComponent(fullPath)}&raw=true`;
+            fullPath = `${payload.parentPath}/${payload.name}`;
         } else {
-            // Fallback: Use root relative path if unknown
-            const fullPath = `/${payload.name}`;
-            streamUrl = `${BASE_URL}/api/raw?path=${encodeURIComponent(fullPath)}&raw=true`;
+            // 2. Dynamic Lookup via ID
+            try {
+                const itemUrl = `${BASE_URL}/api/item?id=${payload.id}`;
+                const itemRes = await soraFetch(itemUrl);
+                if (itemRes && (itemRes.ok || itemRes.status == 200)) {
+                    const itemData = await itemRes.json();
+                    if (itemData.parentReference && itemData.parentReference.path) {
+                        // usage: "/drive/root:/BotUpload/n4bi1AE" -> "/BotUpload/n4bi1AE"
+                        const rawPath = itemData.parentReference.path;
+                        const cleanParent = rawPath.replace("/drive/root:", "");
+                        fullPath = `${cleanParent}/${payload.name}`;
+                    }
+                }
+            } catch (e) {
+                console.log("Dynamic path lookup failed for " + payload.name);
+            }
+
+            if (!fullPath) {
+                // 3. Fallback to root
+                fullPath = `/${payload.name}`;
+            }
         }
+
+        streamUrl = `${BASE_URL}/api/raw?path=${encodeURIComponent(fullPath)}&raw=true`;
 
         const result = {
             streams: [{
